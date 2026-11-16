@@ -19,6 +19,7 @@ import { createUploadManager } from './host/uploads.js'
 import { createHitl } from './host/hitl.js'
 import { createNotifier, normalizeNotify, verifyAction } from './host/notify.js'
 import { loadOrCreateIdentity } from './host/identity.js'
+import { detectTailnet, tailnetUrl } from './host/tailnet.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const WEB_DIR = path.join(HERE, 'web')
@@ -84,6 +85,8 @@ export function apply(ctx, rawConfig) {
   let hostedKey = ''
   let hostedPairCode = ''
   let notifier
+  let tailnet = { available: false }
+  let tailnetAddress = ''
   let joinPairCode = ''
 
   const sessions = {
@@ -352,6 +355,18 @@ export function apply(ctx, rawConfig) {
     .then(async (loaded) => {
       state = loaded
       notifier = createNotifier({ config: config.notify, secret: state.secret, log })
+      // Tailscale is optional: when this machine is already on a tailnet its
+      // MagicDNS name is the best advertised address, because every device in
+      // the same tailnet reaches it directly with no port forwarding.
+      tailnet = await detectTailnet().catch(() => ({ available: false }))
+      tailnetAddress = tailnetUrl(tailnet, config.port)
+      if (tailnetAddress !== '') {
+        if (!config.publicUrl) config.publicUrl = tailnetAddress
+        if (Array.isArray(config.trustedHosts) && tailnet.dnsName) {
+          config.trustedHosts = [...new Set([...config.trustedHosts, tailnet.dnsName])]
+        }
+        log.info?.(`[remote-control] tailnet detected: ${tailnet.dnsName} (${tailnetAddress})`)
+      }
       deviceIdentity = await loadOrCreateIdentity(
         identityFile,
         log,
@@ -590,6 +605,7 @@ export function apply(ctx, rawConfig) {
       // route is gated by consoleAllowed (same-origin GUI or loopback), so the
       // code never reaches a phone that has not paired yet.
       snapshot.pairing = { code: published.code, urls: published.urls.slice() }
+      snapshot.tailnet = { ...tailnet, address: tailnetAddress }
       return json(res, 200, snapshot)
     }
     if (action === '/relay/host' && req.method === 'POST') {
