@@ -1,4 +1,4 @@
-# @kangronghuuu/dsh-remote-control
+# dsh-remote-control-plugin
 
 Control other DSH desktops from the one you are using.
 
@@ -148,7 +148,7 @@ Defaults work on a LAN. Override the row in `$DSH_HOME/profiles/<profile>/cordis
 
 ```yaml
 - id: remote-control
-  name: '@kangronghuuu/dsh-remote-control'
+  name: 'dsh-remote-control-plugin'
   config:
     host: 0.0.0.0            # any interface (default); use one LAN IP to narrow exposure
     port: 57330              # browser page + peer API

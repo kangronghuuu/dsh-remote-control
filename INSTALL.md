@@ -26,7 +26,7 @@ pnpm add /path/to/local-dsh-remote-control-0.6.0.tgz
 **C. Git dependency inside the profile**
 
 ```json
-"@kangronghuuu/dsh-remote-control": "github:kangronghuuu/dsh-remote-control#v0.6.0"
+"dsh-remote-control-plugin": "github:kangronghuuu/dsh-remote-control#v0.6.0"
 ```
 
 pnpm needs credentials for a private repo: either an SSH key on the machine, or
@@ -50,11 +50,11 @@ If you prefer doing it by hand, add the dependency and the bundle entry to
 ```json
 {
   "dependencies": {
-    "@kangronghuuu/dsh-remote-control": "link:C:/Users/<you>/dsh-remote-control"
+    "dsh-remote-control-plugin": "link:C:/Users/<you>/dsh-remote-control"
   },
   "dsh": {
     "profile": {
-      "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@kangronghuuu/dsh-remote-control"]
+      "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-remote-control-plugin"]
     }
   }
 }
@@ -63,7 +63,7 @@ If you prefer doing it by hand, add the dependency and the bundle entry to
 For a tarball install use the absolute path instead of `link:`:
 
 ```json
-"@kangronghuuu/dsh-remote-control": "file:C:/Users/<you>/local-dsh-remote-control-0.6.0.tgz"
+"dsh-remote-control-plugin": "file:C:/Users/<you>/local-dsh-remote-control-0.6.0.tgz"
 ```
 
 then run `pnpm install` in that profile directory and restart DSH.

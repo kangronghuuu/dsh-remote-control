@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: '@kangronghuuu/dsh-remote-control',
+  id: 'dsh-remote-control-plugin',
   factory(require) {
     const React = require('react')
     const h = React.createElement
