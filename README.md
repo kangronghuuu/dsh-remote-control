@@ -1,13 +1,13 @@
-# @local/dsh-remote-control
+﻿# @kangronghuuu/dsh-remote-control
 
 Control other DSH desktops from the one you are using.
 
 Two surfaces share one Host plugin:
 
-- **Devices panel** (Web GUI) — discovers other DSH desktops on the same network, asks the
+- **Devices panel** (Web GUI) â€” discovers other DSH desktops on the same network, asks the
   target for access once, then lists that device's sessions and lets you read the live
   transcript, send prompts, and stop a turn.
-- **Browser page** (phone / any browser) — the same control surface as a small standalone
+- **Browser page** (phone / any browser) â€” the same control surface as a small standalone
   page, unlocked with a pairing code. Useful when the other end is a phone rather than a DSH
   desktop.
 
@@ -44,8 +44,8 @@ the account id of each candidate and flags a different account, but a person app
 LAN discovery only reaches one subnet. Devices on different networks meet through a relay, and
 there are two ways to get one.
 
-**Create it on a device.** In **Devices → Relay**, press **Create relay here**. That Host serves
-the relay on its own listener and shows a ready-to-paste invite — one line holding the URL and
+**Create it on a device.** In **Devices â†’ Relay**, press **Create relay here**. That Host serves
+the relay on its own listener and shows a ready-to-paste invite â€” one line holding the URL and
 the workspace key. Paste it into the other device's Relay panel.
 
 This only reaches other networks if that device is reachable there: the same LAN, a forwarded
@@ -64,7 +64,7 @@ Host it on a VPS, NAS, or any always-on machine, put it behind TLS or a VPN, and
 Either way the workspace key never leaves the devices: the relay only receives its SHA-256 as a
 group id. It forwards opaque `/peer/*` calls, and after pairing every message is sealed end to
 end, so a compromised relay sees ciphertext and can only drop or delay traffic. Group membership
-alone grants nothing — the target still requires the one-time approval before any session call is
+alone grants nothing â€” the target still requires the one-time approval before any session call is
 accepted. Treat the relay as private: whoever holds the group id can join the group and *request*
 access.
 
@@ -73,7 +73,7 @@ access.
 The envelope names its cipher (a byte in the nonce): ChaCha20-Poly1305 when the runtime offers it, AES-256-GCM otherwise, so a build without ChaCha still interoperates.
 
 Paired devices agree a session key with X25519 (ephemeral mixed with static when both sides
-completed the pairing handshake) → HKDF-SHA256 → ChaCha20-Poly1305. The relay envelope seals every
+completed the pairing handshake) â†’ HKDF-SHA256 â†’ ChaCha20-Poly1305. The relay envelope seals every
 message; on a direct LAN lane the request body and reply are sealed with a separate per-transport
 key, and transcript frames with another. Plaintext exists only during bootstrap: the `hello`
 request and the approval response that carries the peer's public keys.
@@ -84,8 +84,8 @@ Peers approved before identity keys existed keep the legacy HMAC path until they
 
 ### Lane ladder
 
-Calls are attempted in order, each with its own budget: punched P2P (`p2pTimeoutMs`) → direct LAN
-(`directTimeoutMs`) → relay. A blocked direct lane is parked per peer for `routeBlockMs` and then
+Calls are attempted in order, each with its own budget: punched P2P (`p2pTimeoutMs`) â†’ direct LAN
+(`directTimeoutMs`) â†’ relay. A blocked direct lane is parked per peer for `routeBlockMs` and then
 retried as soon as fresh discovery evidence arrives. Latency-sensitive reads (`sessions`, session
 config) race the relay against the direct lane so only the first call after a network change pays
 a penalty; writes stay strictly ordered so a prompt can never run twice. `/state` reports `lane`,
@@ -112,8 +112,8 @@ service:
   advertise: true
 ```
 
-Provider order: configured `relayUrl` → named tunnel (`tokenFile`) → quick tunnel → `publicUrl`
-health check → LAN only.
+Provider order: configured `relayUrl` â†’ named tunnel (`tokenFile`) â†’ quick tunnel â†’ `publicUrl`
+health check â†’ LAN only.
 
 **First-run setup.** The first time the Devices panel opens, a setup card asks once how other devices
 should reach this Host: **LAN only**, **Host a relay here**, **Quick tunnel**, or **Join a relay**.
@@ -148,7 +148,7 @@ Defaults work on a LAN. Override the row in `$DSH_HOME/profiles/<profile>/cordis
 
 ```yaml
 - id: remote-control
-  name: '@local/dsh-remote-control'
+  name: '@kangronghuuu/dsh-remote-control'
   config:
     host: 0.0.0.0            # any interface (default); use one LAN IP to narrow exposure
     port: 57330              # browser page + peer API
@@ -205,3 +205,4 @@ browser page does the same for its session.
 - The pairing code protects the browser page only; it is printed at activation and stored in
   `$DSH_HOME/remote-control.json`.
 - Approvals that arrive while no Devices panel is open stay pending for up to 10 minutes.
+

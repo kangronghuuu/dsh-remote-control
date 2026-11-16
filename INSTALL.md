@@ -1,4 +1,4 @@
-# Install on another desktop
+﻿# Install on another desktop
 
 The plugin is self-contained: `index.js`, `client.js`, `host/`, `web/`, `locale/`, `icon.svg`.
 Nothing here refers to the machine it was built on.
@@ -8,7 +8,7 @@ Nothing here refers to the machine it was built on.
 The plugin is self-contained: `index.js`, `client.js`, `host/`, `web/`, `locale/`, `icon.svg`.
 Nothing here refers to the machine it was built on. Three ways to ship it, pick one:
 
-**A. Private repository (recommended — versions stay comparable)**
+**A. Private repository (recommended â€” versions stay comparable)**
 
 ```bash
 git clone git@github.com:kangronghuuu/dsh-remote-control.git ~/dsh-remote-control
@@ -19,14 +19,14 @@ Update later with `git -C ~/dsh-remote-control pull`, then reinstall the profile
 **B. Tarball (no git, no registry)**
 
 ```bash
-npm pack                       # on the source machine -> local-dsh-remote-control-0.5.4.tgz
-pnpm add /path/to/local-dsh-remote-control-0.5.4.tgz
+npm pack                       # on the source machine -> local-dsh-remote-control-0.6.0.tgz
+pnpm add /path/to/local-dsh-remote-control-0.6.0.tgz
 ```
 
 **C. Git dependency inside the profile**
 
 ```json
-"@local/dsh-remote-control": "github:kangronghuuu/dsh-remote-control#v0.5.4"
+"@kangronghuuu/dsh-remote-control": "github:kangronghuuu/dsh-remote-control#v0.6.0"
 ```
 
 pnpm needs credentials for a private repo: either an SSH key on the machine, or
@@ -50,11 +50,11 @@ If you prefer doing it by hand, add the dependency and the bundle entry to
 ```json
 {
   "dependencies": {
-    "@local/dsh-remote-control": "link:C:/Users/<you>/dsh-remote-control"
+    "@kangronghuuu/dsh-remote-control": "link:C:/Users/<you>/dsh-remote-control"
   },
   "dsh": {
     "profile": {
-      "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@local/dsh-remote-control"]
+      "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@kangronghuuu/dsh-remote-control"]
     }
   }
 }
@@ -63,7 +63,7 @@ If you prefer doing it by hand, add the dependency and the bundle entry to
 For a tarball install use the absolute path instead of `link:`:
 
 ```json
-"@local/dsh-remote-control": "file:C:/Users/<you>/local-dsh-remote-control-0.5.4.tgz"
+"@kangronghuuu/dsh-remote-control": "file:C:/Users/<you>/local-dsh-remote-control-0.6.0.tgz"
 ```
 
 then run `pnpm install` in that profile directory and restart DSH.
@@ -84,8 +84,8 @@ node -p "require('./package.json').version"
 Both machines run the same version. Pick the one with a reachable address (same LAN, VPN, or a
 forwarded port):
 
-1. On that machine: **Devices → Relay → Create relay here**, then **Copy** the invite.
-2. On the other machine: **Devices → Relay**, paste the invite into the URL field, **Connect**.
+1. On that machine: **Devices â†’ Relay â†’ Create relay here**, then **Copy** the invite.
+2. On the other machine: **Devices â†’ Relay**, paste the invite into the URL field, **Connect**.
 3. Either machine: **Request** next to the peer, then **Allow** on the target.
 
 No relay reachable? Run one anywhere both machines can reach:
@@ -107,7 +107,7 @@ pinned the same keys for the same invite. If they differ, press **Deny** and pai
 Same-LAN devices connect directly. Across networks the plugin tries a punched UDP lane before the
 relay:
 
-- allow **inbound UDP** for `punchPort` (default `57332`) in the OS firewall — the installer's
+- allow **inbound UDP** for `punchPort` (default `57332`) in the OS firewall â€” the installer's
   rule covers TCP `57330` only;
 - `stunHost` (default `stun.l.google.com`) discovers the public mapping; set it to `false` to skip;
 - `/state` reports `lane` (`lan` / `p2p` / `relay`), `transport`, `timing` and `blocked` per peer.
@@ -151,3 +151,4 @@ service endpoint for reachability diagnostics.
   enough.
 - Restart both machines after installing a new version. Pairings survive restarts; the first call
   after a restart re-establishes forward secrecy.
+
