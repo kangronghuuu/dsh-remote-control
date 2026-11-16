@@ -1,4 +1,6 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import net from 'node:net'
+import tls from 'node:tls'
 
 /**
  * Out-of-band notifications.
@@ -32,7 +34,7 @@ export function verifyAction(secret, requestId, decision, signature) {
 
 export function normalizeNotify(raw) {
   const source = raw && typeof raw === 'object' ? raw : {}
-  const kind = ['ntfy', 'webhook', 'mailgun'].includes(source.kind) ? source.kind : 'none'
+  const kind = ['ntfy', 'webhook', 'mailgun', 'smtp'].includes(source.kind) ? source.kind : 'none'
   const events = Array.isArray(source.events) && source.events.length > 0
     ? source.events.filter((entry) => typeof entry === 'string')
     : DEFAULT_EVENTS
@@ -61,6 +63,11 @@ export function normalizeNotify(raw) {
     domain: typeof source.domain === 'string' ? source.domain.trim() : '',
     apiKey: typeof source.apiKey === 'string' ? source.apiKey.trim() : '',
     apiUrl,
+    // Direct SMTP: still no third party beyond the mailbox itself.
+    smtpHost: typeof source.smtpHost === 'string' ? source.smtpHost.trim() : '',
+    smtpPort: Number.isInteger(source.smtpPort) && source.smtpPort > 0 ? source.smtpPort : 465,
+    smtpUser: typeof source.smtpUser === 'string' ? source.smtpUser.trim() : '',
+    smtpPass: typeof source.smtpPass === 'string' ? source.smtpPass : '',
   }
 }
 
@@ -70,7 +77,9 @@ export function createNotifier({ config, secret, log = console } = {}) {
 
   const enabled = settings.kind === 'mailgun'
     ? Boolean(settings.to && settings.domain && settings.apiKey)
-    : (settings.kind === 'ntfy' || settings.kind === 'webhook') && /^https?:\/\//i.test(settings.url)
+    : settings.kind === 'smtp'
+      ? Boolean(settings.to && settings.smtpHost && settings.smtpUser && settings.smtpPass)
+      : (settings.kind === 'ntfy' || settings.kind === 'webhook') && /^https?:\/\//i.test(settings.url)
 
   function wants(event) {
     return enabled && events.has(event)
@@ -213,9 +222,140 @@ export function createNotifier({ config, secret, log = console } = {}) {
     }
   }
 
+  /** Minimal SMTP client: greeting, EHLO, optional STARTTLS, AUTH LOGIN, DATA. */
+  function smtpReader(socket) {
+    let lines = []
+    let partial = ''
+    let wake = null
+    socket.on('data', (chunk) => {
+      const parts = (partial + chunk.toString('utf8')).split('\r\n')
+      partial = parts.pop() ?? ''
+      for (const line of parts) lines.push(line)
+      if (wake) { const fn = wake; wake = null; fn() }
+    })
+    return async function readReply(timeoutMs = 20000) {
+      const deadline = Date.now() + timeoutMs
+      for (;;) {
+        const end = lines.findIndex((line) => /^\d{3} /.test(line))
+        if (end !== -1) {
+          const reply = lines.slice(0, end + 1)
+          lines = lines.slice(end + 1)
+          return { code: Number(reply[end].slice(0, 3)), lines: reply }
+        }
+        if (Date.now() > deadline) throw new Error('smtp reply timeout')
+        await new Promise((resolve) => { wake = resolve; setTimeout(resolve, 200) })
+      }
+    }
+  }
+
+  function mimeMessage(message, from, to) {
+    const boundary = `dsh-${randomBytes(8).toString('hex')}`
+    const encodeHeader = (value) => (/^[\x20-\x7e]*$/.test(value)
+      ? value
+      : `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`)
+    const chunked = (text) => Buffer.from(text, 'utf8').toString('base64').replace(/(.{76})/g, '$1\r\n')
+    return [
+      `From: ${from}`,
+      `To: ${to}`,
+      `Subject: ${encodeHeader(message.subject)}`,
+      `Date: ${new Date().toUTCString()}`,
+      `Message-ID: <${randomBytes(12).toString('hex')}@dsh-remote-control>`,
+      'MIME-Version: 1.0',
+      `Content-Type: multipart/alternative; boundary="${boundary}"`,
+      '',
+      `--${boundary}`,
+      'Content-Type: text/plain; charset=utf-8',
+      'Content-Transfer-Encoding: base64',
+      '',
+      chunked(message.text),
+      `--${boundary}`,
+      'Content-Type: text/html; charset=utf-8',
+      'Content-Transfer-Encoding: base64',
+      '',
+      chunked(message.html),
+      `--${boundary}--`,
+      '',
+    ].join('\r\n')
+  }
+
+  async function sendSmtp(payload) {
+    const message = emailMessage(payload)
+    const from = settings.from && settings.from.includes('@') ? settings.from : settings.smtpUser
+    const address = /^[^@\s]+@[^@\s]+$/
+    if (!address.test(settings.to) || !address.test(from)) return { ok: false, error: 'smtp-bad-address' }
+
+    const port = settings.smtpPort
+    let socket
+    try {
+      socket = port === 465
+        ? tls.connect({ host: settings.smtpHost, port, servername: settings.smtpHost })
+        : net.connect({ host: settings.smtpHost, port })
+      socket.setTimeout(25000)
+      await new Promise((resolve, reject) => {
+        socket.once(port === 465 ? 'secureConnect' : 'connect', resolve)
+        socket.once('error', reject)
+      })
+
+      let read = smtpReader(socket)
+      const send = (line) => socket.write(`${line}\r\n`)
+      const ehlo = () => { send('EHLO dsh-remote-control'); return read() }
+
+      let reply = await read()
+      if (reply.code !== 220) throw new Error(`smtp greeting ${reply.code}`)
+      reply = await ehlo()
+      if (reply.code !== 250) throw new Error(`smtp ehlo ${reply.code}`)
+
+      if (port !== 465 && reply.lines.some((line) => /STARTTLS/i.test(line))) {
+        send('STARTTLS')
+        reply = await read()
+        if (reply.code !== 220) throw new Error(`smtp starttls ${reply.code}`)
+        socket = tls.connect({ socket, servername: settings.smtpHost })
+        await new Promise((resolve, reject) => {
+          socket.once('secureConnect', resolve)
+          socket.once('error', reject)
+        })
+        read = smtpReader(socket)
+        reply = await ehlo()
+        if (reply.code !== 250) throw new Error(`smtp ehlo after starttls ${reply.code}`)
+      }
+
+      send('AUTH LOGIN')
+      reply = await read()
+      if (reply.code !== 334) throw new Error(`smtp auth ${reply.code}`)
+      send(Buffer.from(settings.smtpUser, 'utf8').toString('base64'))
+      reply = await read()
+      if (reply.code !== 334) throw new Error(`smtp auth user ${reply.code}`)
+      send(Buffer.from(settings.smtpPass, 'utf8').toString('base64'))
+      reply = await read()
+      if (reply.code !== 235) throw new Error(`smtp auth rejected ${reply.code}`)
+
+      send(`MAIL FROM:<${from}>`)
+      reply = await read()
+      if (reply.code !== 250) throw new Error(`smtp mail from ${reply.code}`)
+      send(`RCPT TO:<${settings.to}>`)
+      reply = await read()
+      if (reply.code !== 250 && reply.code !== 251) throw new Error(`smtp rcpt ${reply.code}`)
+      send('DATA')
+      reply = await read()
+      if (reply.code !== 354) throw new Error(`smtp data ${reply.code}`)
+      socket.write(`${mimeMessage(message, from, settings.to)}\r\n.\r\n`)
+      reply = await read()
+      if (reply.code !== 250) throw new Error(`smtp message rejected ${reply.code}`)
+      send('QUIT')
+      return { ok: true }
+    } catch (error) {
+      log.warn?.(`[remote-control] smtp send failed: ${error?.message || error}`)
+      return { ok: false, error: error?.message || String(error) }
+    } finally {
+      try { socket?.end() } catch { /* ignore */ }
+      try { socket?.destroy() } catch { /* ignore */ }
+    }
+  }
+
   async function publish(payload) {
     if (!enabled) return { ok: false, error: 'notifier-disabled' }
     if (settings.kind === 'mailgun') return sendMailgun(payload)
+    if (settings.kind === 'smtp') return sendSmtp(payload)
     let body
     let endpoint = settings.url
     if (settings.kind === 'ntfy') {
@@ -311,6 +451,7 @@ export function createNotifier({ config, secret, log = console } = {}) {
       events: [...events],
       hasActions: Boolean(settings.baseUrl),
       ...(settings.kind === 'mailgun' ? { to: settings.to, domain: settings.domain, hasKey: settings.apiKey !== '' } : {}),
+      ...(settings.kind === 'smtp' ? { to: settings.to, host: settings.smtpHost, port: settings.smtpPort } : {}),
     }),
   }
 }
