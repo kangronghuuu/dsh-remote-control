@@ -100,6 +100,9 @@ const state = {
   earliestSeq: null,
   historyMore: true,
   queueItems: [],
+  // Last compact "process" row, so consecutive identical fallback events fold
+  // into a counter instead of flooding the transcript.
+  lastProcess: null,
 }
 
 let renderingHistory = false
@@ -480,7 +483,142 @@ function setStatus(value) {
 
 /* ---------------- lightweight markdown ---------------- */
 
-function renderInline(text) {
+/* ---------------- lightweight math ---------------- */
+
+// A deliberately small LaTeX subset: fractions, roots, scripts, greek letters
+// and the operators that show up in real transcripts. No dependency, no layout
+// engine: unsupported commands fall back to their own name so nothing is lost.
+const MATH_COMMANDS = {
+  '\\alpha': 'α', '\\beta': 'β', '\\gamma': 'γ', '\\delta': 'δ', '\\epsilon': 'ε',
+  '\\varepsilon': 'ε', '\\zeta': 'ζ', '\\eta': 'η', '\\theta': 'θ', '\\vartheta': 'ϑ',
+  '\\iota': 'ι', '\\kappa': 'κ', '\\lambda': 'λ', '\\mu': 'μ', '\\nu': 'ν', '\\xi': 'ξ',
+  '\\pi': 'π', '\\rho': 'ρ', '\\sigma': 'σ', '\\tau': 'τ', '\\upsilon': 'υ', '\\phi': 'φ',
+  '\\varphi': 'φ', '\\chi': 'χ', '\\psi': 'ψ', '\\omega': 'ω',
+  '\\Gamma': 'Γ', '\\Delta': 'Δ', '\\Theta': 'Θ', '\\Lambda': 'Λ', '\\Xi': 'Ξ', '\\Pi': 'Π',
+  '\\Sigma': 'Σ', '\\Phi': 'Φ', '\\Psi': 'Ψ', '\\Omega': 'Ω',
+  '\\times': '×', '\\cdot': '·', '\\div': '÷', '\\pm': '±', '\\mp': '∓',
+  '\\le': '≤', '\\leq': '≤', '\\ge': '≥', '\\geq': '≥', '\\ne': '≠', '\\neq': '≠',
+  '\\approx': '≈', '\\equiv': '≡', '\\sim': '∼', '\\propto': '∝', '\\infty': '∞',
+  '\\partial': '∂', '\\nabla': '∇', '\\sum': '∑', '\\prod': '∏', '\\int': '∫', '\\oint': '∮',
+  '\\to': '→', '\\rightarrow': '→', '\\leftarrow': '←', '\\Rightarrow': '⇒', '\\mapsto': '↦',
+  '\\in': '∈', '\\notin': '∉', '\\subset': '⊂', '\\subseteq': '⊆', '\\cup': '∪', '\\cap': '∩',
+  '\\forall': '∀', '\\exists': '∃', '\\emptyset': '∅', '\\ldots': '…', '\\cdots': '⋯', '\\dots': '…',
+  '\\quad': ' ', '\\,': ' ', '\\;': ' ', '\\:': ' ', '\\!': '',
+}
+
+/** `$HOME`, `$1` and prices must stay prose; only math-looking spans render. */
+function looksLikeMath(tex) {
+  const value = tex.trim()
+  if (value === '') return false
+  return /\\[a-zA-Z]+|[\^_]|[{}]|\\|=/.test(value)
+}
+
+function parseMathNodes(tex) {
+  const nodes = []
+  let i = 0
+  const text = (value) => document.createTextNode(value)
+
+  const readGroup = () => {
+    if (tex[i] !== '{') {
+      const char = tex[i] ?? ''
+      i += 1
+      return char
+    }
+    let depth = 0
+    let j = i
+    while (j < tex.length) {
+      if (tex[j] === '{') depth += 1
+      else if (tex[j] === '}') { depth -= 1; if (depth === 0) break }
+      j += 1
+    }
+    const inner = tex.slice(i + 1, j)
+    i = j + 1
+    return inner
+  }
+
+  while (i < tex.length) {
+    const char = tex[i]
+    if (char === '{') { nodes.push(...parseMathNodes(readGroup())); continue }
+    if (char === '}') { i += 1; continue }
+    if (char === '^' || char === '_') {
+      i += 1
+      const group = readGroup()
+      const script = document.createElement(char === '^' ? 'sup' : 'sub')
+      script.append(...parseMathNodes(group))
+      nodes.push(script)
+      continue
+    }
+    if (char === '\\') {
+      let j = i + 1
+      if (!/[a-zA-Z]/.test(tex[j] ?? '')) {
+        const literal = tex[j] ?? ''
+        if (literal !== '') nodes.push(text(literal))
+        i = j + 1
+        continue
+      }
+      let name = ''
+      while (/[a-zA-Z]/.test(tex[j] ?? '')) { name += tex[j]; j += 1 }
+      i = j
+      if (name === 'frac') {
+        const numerator = readGroup()
+        const denominator = readGroup()
+        const wrap = document.createElement('span')
+        wrap.className = 'math-frac'
+        const top = document.createElement('span')
+        top.className = 'math-num'
+        top.append(...parseMathNodes(numerator))
+        const bottom = document.createElement('span')
+        bottom.className = 'math-den'
+        bottom.append(...parseMathNodes(denominator))
+        wrap.append(top, bottom)
+        nodes.push(wrap)
+        continue
+      }
+      if (name === 'sqrt') {
+        const wrap = document.createElement('span')
+        wrap.className = 'math-sqrt'
+        wrap.append(text('√'))
+        const radicand = document.createElement('span')
+        radicand.className = 'math-radicand'
+        radicand.append(...parseMathNodes(readGroup()))
+        wrap.append(radicand)
+        nodes.push(wrap)
+        continue
+      }
+      if (name === 'text' || name === 'mathrm' || name === 'textrm') {
+        nodes.push(text(readGroup()))
+        continue
+      }
+      if (name === 'mathbf' || name === 'boldsymbol' || name === 'textbf') {
+        const strong = document.createElement('strong')
+        strong.append(...parseMathNodes(readGroup()))
+        nodes.push(strong)
+        continue
+      }
+      if (name === 'left' || name === 'right') {
+        let delimiter = tex[i] ?? ''
+        if (delimiter === '\\') { delimiter = tex[i + 1] ?? ''; i += 2 } else { i += 1 }
+        if (delimiter !== '' && delimiter !== '.') nodes.push(text(delimiter))
+        continue
+      }
+      const symbol = MATH_COMMANDS['\\' + name]
+      nodes.push(text(symbol !== undefined ? symbol : name))
+      continue
+    }
+    nodes.push(text(char))
+    i += 1
+  }
+  return nodes
+}
+
+function renderMath(tex, display) {
+  const node = document.createElement(display ? 'div' : 'span')
+  node.className = display ? 'math math-block' : 'math'
+  node.append(...parseMathNodes(tex))
+  return node
+}
+
+function inlineNodes(text) {
   const nodes = []
   const pattern = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(\[[^\]\n]+\]\((https?:\/\/[^)\s]+)\))/g
   let last = 0
@@ -510,6 +648,22 @@ function renderInline(text) {
     last = pattern.lastIndex
   }
   if (last < text.length) nodes.push(document.createTextNode(text.slice(last)))
+  return nodes
+}
+
+function renderInline(text) {
+  const nodes = []
+  const pattern = /\$([^$\n]{1,200})\$|\\\((.+?)\\\)/g
+  let last = 0
+  let match
+  while ((match = pattern.exec(text)) !== null) {
+    const tex = match[1] ?? match[2] ?? ''
+    if (!looksLikeMath(tex)) continue
+    if (match.index > last) nodes.push(...inlineNodes(text.slice(last, match.index)))
+    nodes.push(renderMath(tex, false))
+    last = pattern.lastIndex
+  }
+  if (last < text.length) nodes.push(...inlineNodes(text.slice(last)))
   return nodes
 }
 
@@ -543,7 +697,14 @@ function renderMarkdown(text) {
     if (code.lang) block.dataset.lang = code.lang
     block.textContent = code.lines.join('\n')
     pre.append(block)
-    frag.append(pre)
+    const wrap = document.createElement('div')
+    wrap.className = 'code-wrap'
+    // Capture the text now: `code` is cleared once this block is emitted, so a
+    // lazily read closure would throw when the button is clicked later.
+    const source = code.lines.join('\n')
+    wrap.append(copyButton(() => source))
+    wrap.append(pre)
+    frag.append(wrap)
     code = null
   }
 
@@ -587,6 +748,42 @@ function renderMarkdown(text) {
       index--
       frag.append(buildTable(header, aligns, body))
       continue
+    }
+
+    if (/^\s*\$/.test(line)) {
+      const trimmed = line.trim()
+      if (/^\$\$.+\$\$$/s.test(trimmed)) {
+        flushParagraph()
+        flushList()
+        frag.append(renderMath(trimmed.slice(2, -2), true))
+        continue
+      }
+      if (trimmed.startsWith('$$')) {
+        // Display block spanning several lines, closed by a later `$$`.
+        const parts = []
+        const first = trimmed.slice(2)
+        if (first !== '') parts.push(first)
+        let cursor = index + 1
+        let closed = false
+        while (cursor < lines.length) {
+          const entry = lines[cursor]
+          const closeAt = entry.indexOf('$$')
+          if (closeAt !== -1) {
+            parts.push(entry.slice(0, closeAt))
+            index = cursor
+            closed = true
+            break
+          }
+          parts.push(entry)
+          cursor += 1
+        }
+        if (closed) {
+          flushParagraph()
+          flushList()
+          frag.append(renderMath(parts.join('\n'), true))
+          continue
+        }
+      }
     }
 
     if (/^\s*$/.test(line)) { flushParagraph(); flushList(); continue }
@@ -732,6 +929,7 @@ function appendEvent(event) {
       break
     }
     default:
+      appendProcessEvent(event.type, data)
       break
   }
 }
@@ -820,6 +1018,12 @@ function addAssistant(text, reasoning, interrupted, images) {
     note.textContent = 'interrupted'
     bubble.append(note)
   }
+  if (text) {
+    const actions = document.createElement('div')
+    actions.className = 'bubble-actions'
+    actions.append(copyButton(() => text))
+    bubble.append(actions)
+  }
   push(bubble)
 }
 
@@ -875,6 +1079,18 @@ function renderToolArgs(container, args, raw) {
     p.textContent = args.description
     container.append(p)
     shown.add('description')
+  }
+
+  const before = typeof args.old_string === 'string' ? args.old_string
+    : typeof args.before === 'string' ? args.before : ''
+  const after = typeof args.new_string === 'string' ? args.new_string
+    : typeof args.after === 'string' ? args.after : ''
+  if (before !== '' || after !== '') {
+    appendDiff(container, before, after)
+    for (const key of ['old_string', 'new_string', 'before', 'after']) shown.add(key)
+  } else if (typeof args.content === 'string' && args.content !== '') {
+    appendDiff(container, '', args.content)
+    shown.add('content')
   }
 
   for (const key of ['command', 'cmd', 'path', 'file_path', 'query', 'url', 'pattern']) {
@@ -950,6 +1166,180 @@ function addStrip(text) {
   strip.className = 'strip'
   strip.textContent = text
   push(strip)
+}
+
+/* ---------------- events without a dedicated renderer ---------------- */
+
+// Pure telemetry: shadowing them as visible rows would bury the transcript.
+const NOISE_EVENTS = new Set([
+  'session-log-deepseek/delivery-accepted',
+  'session/title-llm-request',
+  'subagent/catalog',
+  'session/end-seed',
+  'request/header',
+  'request/context',
+  'context/injection',
+  'step/start',
+  'step/end',
+])
+
+/** One readable line for an event type the page has no card for. */
+const PROCESS_EVENTS = {
+  'job/registered': { label: 'Job started', detail: (d) => d.name || d.job?.name || d.jobId || '' },
+  'job/settled': { label: 'Job finished', detail: (d) => [d.name || d.job?.name || d.jobId, d.status || d.state].filter(Boolean).join(' · ') },
+  'tool-workflow/agent-start': { label: 'Subagent started', detail: (d) => d.name || d.agent?.name || d.agentId || '' },
+  'tool-workflow/agent-end': { label: 'Subagent finished', detail: (d) => [d.name || d.agent?.name || d.agentId, d.status || d.error?.code].filter(Boolean).join(' · ') },
+  'tool-workflow/run-start': { label: 'Workflow started', detail: (d) => d.name || d.workflow?.name || '' },
+  'tool-workflow/run-end': { label: 'Workflow finished', detail: (d) => [d.name || d.workflow?.name, d.status || d.error?.code].filter(Boolean).join(' · ') },
+  'workspace/changes': { label: 'Workspace changed', detail: (d) => countLabel(d.changes ?? d.files ?? d.paths, 'file') },
+  'todo/write': { label: 'Plan updated', detail: (d) => countLabel(d.todos ?? d.items, 'item') },
+  'command/run': { label: 'Command', detail: (d) => d.name || d.command || '' },
+  'command/done': { label: 'Command finished', detail: (d) => [d.name || d.command, d.exitCode].filter((v) => v !== undefined && v !== null).join(' · ') },
+  'approval/asked': { label: 'Approval requested', detail: (d) => d.toolName || '' },
+  'approval/decided': { label: 'Approval decided', detail: (d) => d.outcome || d.decision || '' },
+  'approval/policy': { label: 'Approval policy', detail: (d) => d.policy || d.mode || '' },
+  'system/message': { label: 'System note', detail: (d) => firstLine(blocksText(d.content ?? d.message?.content)).slice(0, 90) },
+  'developer/message': { label: 'Developer note', detail: (d) => firstLine(blocksText(d.content ?? d.message?.content)).slice(0, 90) },
+  'agent/inbox/spliced': { label: 'Queue updated', detail: (d) => countLabel(d.items ?? d.messages, 'message') },
+  'permission/preset': { label: 'Permission changed', detail: (d) => d.preset || d.mode || d.value || '' },
+  'sandbox/mode': { label: 'Sandbox changed', detail: (d) => d.mode || d.value || '' },
+  'agent-preset/selected': { label: 'Agent preset', detail: (d) => d.preset || d.name || '' },
+  'credential/rejected': { label: 'Credential rejected', detail: (d) => d.provider || d.reason || '' },
+  'deliverables/presented': { label: 'Deliverables', detail: (d) => countLabel(d.files ?? d.deliverables, 'file') },
+  'document-render/failed': { label: 'Document render failed', detail: (d) => d.path || d.message || '' },
+}
+
+function countLabel(value, noun) {
+  const count = Array.isArray(value) ? value.length : Number(value)
+  if (!Number.isFinite(count) || count <= 0) return ''
+  return `${count} ${noun}${count === 1 ? '' : 's'}`
+}
+
+function firstLine(text) {
+  const line = String(text || '').split('\n').find((entry) => entry.trim() !== '')
+  return line ? line.trim() : ''
+}
+
+/**
+ * Fallback renderer. Anything without a dedicated card gets one compact line
+ * instead of disappearing, so compaction, jobs, subagents and workspace
+ * changes stay visible. Consecutive identical lines collapse into a counter.
+ */
+function appendProcessEvent(type, data) {
+  if (NOISE_EVENTS.has(type)) return
+  const spec = PROCESS_EVENTS[type]
+  const label = spec?.label ?? type
+  const detail = (() => {
+    try { return String(spec?.detail?.(data) ?? '') } catch { return '' }
+  })()
+  const key = `${type}|${detail}`
+
+  const previous = state.lastProcess
+  if (previous && previous.key === key && previous.node?.isConnected) {
+    previous.count += 1
+    previous.node.querySelector('.process-count').textContent = `×${previous.count}`
+    previous.node.querySelector('.process-count').hidden = false
+    return
+  }
+
+  const row = document.createElement('div')
+  row.className = 'process-row'
+  row.dataset.event = type
+  const labelNode = document.createElement('span')
+  labelNode.className = 'process-label'
+  labelNode.textContent = label
+  const detailNode = document.createElement('span')
+  detailNode.className = 'process-detail'
+  detailNode.textContent = detail
+  const countNode = document.createElement('span')
+  countNode.className = 'process-count'
+  countNode.hidden = true
+  row.append(labelNode, detailNode, countNode)
+
+  push(row)
+  state.lastProcess = { key, node: row, count: 1 }
+}
+
+/* ---------------- copy + diff ---------------- */
+
+async function copyText(text, button) {
+  try {
+    await navigator.clipboard.writeText(text)
+    if (button) {
+      const previous = button.textContent
+      button.textContent = 'Copied'
+      setTimeout(() => { button.textContent = previous }, 1200)
+    }
+  } catch {
+    if (button) button.textContent = 'Copy failed'
+  }
+}
+
+function copyButton(getText, label = 'Copy') {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'copy-button'
+  button.textContent = label
+  button.addEventListener('click', (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    void copyText(getText(), button)
+  })
+  return button
+}
+
+/**
+ * Line diff for `edit` calls: a real LCS so the rendering matches what changed
+ * instead of dumping both strings. Falls back to a before/after block when the
+ * inputs are too large for the table.
+ */
+function diffRows(before, after, maxLines = 200) {
+  const left = String(before ?? '').split('\n')
+  const right = String(after ?? '').split('\n')
+  const rows = []
+  if (left.length * right.length > 250_000) {
+    for (const line of left.slice(0, maxLines)) rows.push({ kind: 'del', text: line })
+    for (const line of right.slice(0, maxLines)) rows.push({ kind: 'add', text: line })
+    return rows
+  }
+  const table = Array.from({ length: left.length + 1 }, () => new Array(right.length + 1).fill(0))
+  for (let i = left.length - 1; i >= 0; i -= 1) {
+    for (let j = right.length - 1; j >= 0; j -= 1) {
+      table[i][j] = left[i] === right[j] ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1])
+    }
+  }
+  let i = 0
+  let j = 0
+  while (i < left.length && j < right.length) {
+    if (left[i] === right[j]) { rows.push({ kind: 'same', text: left[i] }); i += 1; j += 1 }
+    else if (table[i + 1][j] >= table[i][j + 1]) { rows.push({ kind: 'del', text: left[i] }); i += 1 }
+    else { rows.push({ kind: 'add', text: right[j] }); j += 1 }
+  }
+  while (i < left.length) { rows.push({ kind: 'del', text: left[i] }); i += 1 }
+  while (j < right.length) { rows.push({ kind: 'add', text: right[j] }); j += 1 }
+  return rows
+}
+
+function appendDiff(container, before, after) {
+  const rows = diffRows(before, after).filter((row) => row.kind !== 'same' || row.text.trim() !== '')
+  const block = document.createElement('div')
+  block.className = 'diff'
+  let shown = 0
+  for (const row of rows) {
+    if (shown >= 240) {
+      const more = document.createElement('div')
+      more.className = 'diff-line diff-more'
+      more.textContent = `… ${rows.length - shown} more lines`
+      block.append(more)
+      break
+    }
+    const line = document.createElement('div')
+    line.className = `diff-line diff-${row.kind}`
+    line.textContent = `${row.kind === 'add' ? '+' : row.kind === 'del' ? '-' : ' '}${row.text}`
+    block.append(line)
+    shown += 1
+  }
+  container.append(block)
 }
 
 /* ---------------- human in the loop ---------------- */
@@ -1137,6 +1527,8 @@ function scrollLogTo(top) {
 
 function push(node) {
   el.empty.hidden = true
+  // Any real message breaks a run of collapsed process lines.
+  if (node.className !== 'process-row') state.lastProcess = null
   el.log.append(node)
   if (state.pinned && !renderingHistory) {
     requestAnimationFrame(() => {
