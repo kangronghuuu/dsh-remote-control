@@ -169,7 +169,7 @@ window.__ModuleLoader__.load({
         h('div', { style: { width: 'min(560px, 94vw)', background: 'var(--dsw-alias-bg-l1, #1b1d21)', border: '1px solid var(--dsw-alias-border-l1, #333)', borderRadius: '14px', padding: '18px', display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '90vh', overflow: 'auto' } },
           h('div', { style: { fontSize: '16px', fontWeight: 600 } }, 'Set up remote access'),
           h('div', { style: S.meta }, 'Choose how other devices reach this Host. Identity keys stay local; you can change this later from the Service card.'),
-          busy === 'setup' ? h('div', { style: S.meta }, 'Workingâ€¦') : null,
+          busy === 'setup' ? h('div', { style: S.meta }, 'Working…') : null,
           error ? h('div', { style: S.error }, error) : null,
           row('Only this network (LAN)', 'No relay and no tunnel; nothing is downloaded.', () => onChoose('lan')),
           row('Host a relay here', 'Stable invite: this Host serves the relay. No extra install.', () => onChoose('relay-host')),
@@ -462,13 +462,13 @@ window.__ModuleLoader__.load({
                     onClick: () => setAttempt((value) => value + 1),
                   }, 'Retry'))
                 : streamState === 'connecting'
-                  ? 'Connecting to the deviceâ€¦'
+                  ? 'Connecting to the device…'
                   : (blank
                     ? 'This session is empty. Send a message to start it.'
                     : 'No messages yet. Send one below.'))
             : entries.map((entry) => renderEntry(entry)),
           streamState === 'error' && entries.length > 0
-            ? h('div', { style: S.note }, 'Stream lost â€” retryingâ€¦')
+            ? h('div', { style: S.note }, 'Stream lost — retrying…')
             : null,
           live ? h('div', { style: { ...S.bubble, ...S.assistantBubble, opacity: 0.85 } }, live) : null,
         ),
@@ -483,13 +483,13 @@ window.__ModuleLoader__.load({
                     borderRadius: 999, background: 'rgba(127,127,127,0.18)', fontSize: 12,
                   },
                 },
-                  `${file.name} Â· ${Math.max(1, Math.round(file.size / 1024))} KB`,
+                  `${file.name} · ${Math.max(1, Math.round(file.size / 1024))} KB`,
                   h('button', {
                     type: 'button',
                     title: 'Remove',
                     style: { border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', padding: 0 },
                     onClick: () => setPendingFiles((current) => current.filter((_, position) => position !== index)),
-                  }, 'âœ•'),
+                  }, '✕'),
                 )),
                 uploading
                   ? h('span', { style: { fontSize: 12, opacity: 0.8 } }, `Uploading ${uploading.name} ${Math.round(uploading.progress * 100)}%`)
@@ -500,7 +500,7 @@ window.__ModuleLoader__.load({
             style: S.input,
             rows: 1,
             value: draft,
-            placeholder: 'Message this deviceâ€¦',
+            placeholder: 'Message this device…',
             onChange: (event) => setDraft(event.target.value),
             onKeyDown: (event) => {
               if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send() }
@@ -521,7 +521,7 @@ window.__ModuleLoader__.load({
             style: { ...S.button, ...S.primary },
             onClick: send,
             disabled: uploading !== null || (!draft.trim() && pendingFiles.length === 0),
-          }, uploading ? 'Uploadingâ€¦' : 'Send'),
+          }, uploading ? 'Uploading…' : 'Send'),
         ),
       )
     }
@@ -529,7 +529,7 @@ window.__ModuleLoader__.load({
     function renderEntry(entry) {
       if (entry.kind === 'user') return h('div', { key: entry.key, style: { ...S.bubble, ...S.userBubble } }, entry.text)
       if (entry.kind === 'assistant') return h('div', { key: entry.key, style: { ...S.bubble, ...S.assistantBubble } }, entry.text)
-      if (entry.kind === 'tool') return h('div', { key: entry.key, style: S.toolRow }, `âš™ ${entry.text}`)
+      if (entry.kind === 'tool') return h('div', { key: entry.key, style: S.toolRow }, `⚙ ${entry.text}`)
       return h('div', { key: entry.key, style: S.note }, entry.text)
     }
 
@@ -820,11 +820,11 @@ window.__ModuleLoader__.load({
           h('div', null,
             h('h2', { style: S.title }, 'Devices'),
             h('div', { style: S.subtitle },
-              self ? `${self.deviceName} Â· ${shortAccount(self.userId)} Â· port ${self.port}` : 'Discoveringâ€¦'),
+              self ? `${self.deviceName} · ${shortAccount(self.userId)} · port ${self.port}` : 'Discovering…'),
           ),
           h('div', { style: S.grow }),
           h('span', { style: { ...S.chip, ...(relay?.connected ? S.chipOk : {}) } },
-            relay?.connected ? `Relay Â· ${relay.peers}` : 'LAN only'),
+            relay?.connected ? `Relay · ${relay.peers}` : 'LAN only'),
           h('button', { type: 'button', style: S.button, onClick: () => setRelayOpen((value) => !value) }, 'Relay'),
           h('span', { style: S.chip }, `${peers.length} found`),
           h('button', { type: 'button', style: S.button, onClick: refresh }, 'Refresh'),
@@ -839,7 +839,7 @@ window.__ModuleLoader__.load({
           ? h('div', { style: { ...S.notice, display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
             h('span', { style: { fontWeight: 600 } }, 'Service'),
             h('span', { style: { ...S.chip, ...(state.service.healthy ? S.chipOk : S.chipWarn) } }, state.service.healthy ? 'healthy' : 'unhealthy'),
-            h('span', { style: S.meta }, state.service.provider + (state.service.since ? ' Â· up ' + uptimeText(state.service.since) : '')),
+            h('span', { style: S.meta }, state.service.provider + (state.service.since ? ' · up ' + uptimeText(state.service.since) : '')),
             state.service.endpoint
               ? h('span', { style: { ...S.meta, maxWidth: '320px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: state.service.endpoint }, state.service.endpoint)
               : null,
@@ -864,7 +864,7 @@ window.__ModuleLoader__.load({
         state?.pairing?.code
           ? h('div', { style: { ...S.notice, display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' } },
             h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '240px' } },
-              h('span', { style: S.meta }, 'Pairing code â€” enter it on the phone, or scan the code to pair automatically'),
+              h('span', { style: S.meta }, 'Pairing code — enter it on the phone, or scan the code to pair automatically'),
               h('span', {
                 style: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '30px', letterSpacing: '8px', fontWeight: 600 },
                 onDblClick: () => { try { navigator.clipboard?.writeText(state.pairing.code) } catch { /* ignore */ } },
@@ -902,7 +902,7 @@ window.__ModuleLoader__.load({
             relay?.hosted
               ? h('div', null,
                 h('div', { style: { ...S.meta, marginBottom: '6px' } },
-                  'This device is hosting the relay. Paste this invite into the other deviceâ€™s Relay panel.'),
+                  'This device is hosting the relay. Paste this invite into the other device’s Relay panel.'),
                 relay.invite
                   ? h('img', {
                     alt: 'Invite QR code',
@@ -925,7 +925,7 @@ window.__ModuleLoader__.load({
                   h('button', { type: 'button', style: S.button, disabled: busy === 'relay', onClick: stopHosting }, 'Stop hosting'),
                 ),
                 h('div', { style: { ...S.meta, marginTop: '6px' } },
-                  `Reachable at ${(relay.urls || []).join(', ') || 'this machine'} â€” forward that port (or set publicUrl) so other networks can reach it.`),
+                  `Reachable at ${(relay.urls || []).join(', ') || 'this machine'} — forward that port (or set publicUrl) so other networks can reach it.`),
                 h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '8px' } },
                   h('button', {
                     type: 'button',
@@ -937,7 +937,7 @@ window.__ModuleLoader__.load({
                     ? h('span', { style: { ...S.meta, flex: 1 } },
                       reachability.ok
                         ? `Reachable at ${reachability.url}${reachability.upnp?.mapped ? ' (UPnP mapping)' : ''}`
-                        : `Not reachable${reachability.upnp?.available === false ? ' â€” no UPnP gateway on this network' : reachability.hint ? ` â€” ${reachability.hint}` : ''}`)
+                        : `Not reachable${reachability.upnp?.available === false ? ' — no UPnP gateway on this network' : reachability.hint ? ` — ${reachability.hint}` : ''}`)
                     : null,
                 ),
               )
@@ -984,7 +984,7 @@ window.__ModuleLoader__.load({
                 request.fingerprint ? `key ${String(request.fingerprint).slice(0, 12)}` : '',
                 request.relay ? `via ${request.relay}` : '',
                 request.relayChanged ? 'relay changed since the last approval' : '',
-              ].filter(Boolean).join(' Â· ')),
+              ].filter(Boolean).join(' · ')),
             h('div', { style: { display: 'flex', gap: '8px' } },
               h('button', {
                 type: 'button', style: { ...S.button, ...S.primary }, disabled: busy === request.requestId,
@@ -1014,7 +1014,7 @@ window.__ModuleLoader__.load({
                 },
                   h('div', { style: { flex: 1, minWidth: 0 } },
                     h('div', { style: S.name }, peer.deviceName),
-                    h('div', { style: S.meta }, `${peer.address}:${peer.port} Â· ${peer.userId ? shortAccount(peer.userId) : 'signed out'} Â· ${peer.transport === 'relay' ? 'relay' : 'LAN'} Â· ${relativeTime(peer.lastSeen)}`),
+                    h('div', { style: S.meta }, `${peer.address}:${peer.port} · ${peer.userId ? shortAccount(peer.userId) : 'signed out'} · ${peer.transport === 'relay' ? 'relay' : 'LAN'} · ${relativeTime(peer.lastSeen)}`),
                   ),
                   peer.approved
                     ? h('span', { style: { ...S.chip, ...S.chipOk } }, 'Trusted')
@@ -1060,7 +1060,7 @@ window.__ModuleLoader__.load({
           openPeer
             ? h('div', { style: { ...S.column, flex: 1, minWidth: 0 } },
               sessions === null
-                ? h('div', { style: S.empty }, 'Loading sessionsâ€¦')
+                ? h('div', { style: S.empty }, 'Loading sessions…')
                 : sessions.length === 0
                   ? h('div', { style: S.empty }, 'This device has no sessions.')
                   : h('div', { style: { display: 'flex', flex: 1, minHeight: 0 } },
@@ -1073,7 +1073,7 @@ window.__ModuleLoader__.load({
                         h('div', { style: { minWidth: 0 } },
                           h('div', { style: S.name }, session.title || session.cwd || session.id),
                           h('div', { style: S.meta },
-                            [session.running ? 'running' : '', session.blank ? 'empty' : '', relativeTime(session.updatedAt)].filter(Boolean).join(' Â· ')),
+                            [session.running ? 'running' : '', session.blank ? 'empty' : '', relativeTime(session.updatedAt)].filter(Boolean).join(' · ')),
                         ),
                       ))),
                     ),

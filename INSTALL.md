@@ -82,8 +82,8 @@ node -p "require('./package.json').version"
 Both machines run the same version. Pick the one with a reachable address (same LAN, VPN, or a
 forwarded port):
 
-1. On that machine: **Devices â†’ Relay â†’ Create relay here**, then **Copy** the invite.
-2. On the other machine: **Devices â†’ Relay**, paste the invite into the URL field, **Connect**.
+1. On that machine: **Devices → Relay → Create relay here**, then **Copy** the invite.
+2. On the other machine: **Devices → Relay**, paste the invite into the URL field, **Connect**.
 3. Either machine: **Request** next to the peer, then **Allow** on the target.
 
 No relay reachable? Run one anywhere both machines can reach:
@@ -105,7 +105,7 @@ pinned the same keys for the same invite. If they differ, press **Deny** and pai
 Same-LAN devices connect directly. Across networks the plugin tries a punched UDP lane before the
 relay:
 
-- allow **inbound UDP** for `punchPort` (default `57332`) in the OS firewall â€” the installer's
+- allow **inbound UDP** for `punchPort` (default `57332`) in the OS firewall — the installer's
   rule covers TCP `57330` only;
 - `stunHost` (default `stun.l.google.com`) discovers the public mapping; set it to `false` to skip;
 - `/state` reports `lane` (`lan` / `p2p` / `relay`), `transport`, `timing` and `blocked` per peer.
