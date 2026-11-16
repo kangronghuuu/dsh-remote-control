@@ -1,6 +1,6 @@
 ﻿{
     "name":  "@local/dsh-remote-control",
-    "version":  "0.5.4",
+    "version":  "0.5.5",
     "private":  true,
     "type":  "module",
     "description":  "Remote control for DSH: a Devices panel that discovers other DSH desktops signed into the same account, pairs with them once, and drives their sessions.",

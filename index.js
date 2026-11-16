@@ -908,7 +908,11 @@ export function apply(ctx, rawConfig) {
             placement: String(item?.placement ?? 'queued'),
             text: contentText(item?.content),
           }))
-          .filter((item) => item.id !== '')
+          // Only messages still waiting to be sent belong in the queue list.
+          // `steering` items are already injected into the running turn and
+          // `context` items are Host-injected, so both would read as stale
+          // duplicates of something the transcript already shows.
+          .filter((item) => item.id !== '' && item.placement === 'queued')
         return json(res, 200, {
           active: Boolean(state?.active),
           running: Boolean(state?.running),

@@ -1151,12 +1151,15 @@ function push(node) {
 /* ---------------- queued messages ---------------- */
 
 function renderQueue(items) {
-  state.queueItems = items
+  // Steered and context messages are already part of the transcript; keeping
+  // them here would show the same text twice and leave a stale entry behind.
+  const queued = (Array.isArray(items) ? items : []).filter((item) => (item?.placement ?? 'queued') === 'queued')
+  state.queueItems = queued
   if (!el.queue) return
   el.queue.textContent = ''
-  el.queue.hidden = items.length === 0
+  el.queue.hidden = queued.length === 0
 
-  for (const item of items) {
+  for (const item of queued) {
     const row = document.createElement('div')
     row.className = 'queue-item'
 
