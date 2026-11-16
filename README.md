@@ -1,5 +1,15 @@
 # dsh-remote-control-plugin
 
+## Install
+
+```bash
+pnpm add dsh-remote-control-plugin
+```
+
+Add `dsh-remote-control-plugin` to `dsh.profile.bundles` in
+`$DSH_HOME/profiles/<profile>/package.json`, run `pnpm install`, then restart DSH.
+Full instructions, including offline installs and version parity: [INSTALL.md](INSTALL.md).
+
 Control other DSH desktops from the one you are using.
 
 Two surfaces share one Host plugin:

@@ -5,33 +5,31 @@ Nothing here refers to the machine it was built on.
 
 ## 1. Get the package onto that machine
 
-The plugin is self-contained: `index.js`, `client.js`, `host/`, `web/`, `locale/`, `icon.svg`.
-Nothing here refers to the machine it was built on. Three ways to ship it, pick one:
+**A. npm (recommended)**
 
-**A. Private repository (recommended â€” versions stay comparable)**
+```bash
+pnpm add dsh-remote-control-plugin
+```
+
+Published as `dsh-remote-control-plugin`. Upgrade later with
+`pnpm update dsh-remote-control-plugin` and restart DSH.
+
+**B. Private repository (for unreleased changes)**
 
 ```bash
 git clone git@github.com:kangronghuuu/dsh-remote-control.git ~/dsh-remote-control
 ```
 
-Update later with `git -C ~/dsh-remote-control pull`, then reinstall the profile dependency.
-
-**B. Tarball (no git, no registry)**
+**C. Tarball (offline)**
 
 ```bash
-npm pack                       # on the source machine -> local-dsh-remote-control-0.6.0.tgz
-pnpm add /path/to/local-dsh-remote-control-0.6.0.tgz
+npm pack                       # on the source machine
+pnpm add /path/to/dsh-remote-control-plugin-0.6.0.tgz
 ```
 
-**C. Git dependency inside the profile**
-
-```json
-"dsh-remote-control-plugin": "github:kangronghuuu/dsh-remote-control#v0.6.0"
-```
-
-pnpm needs credentials for a private repo: either an SSH key on the machine, or
-`git config --global url."https://<token>@github.com/".insteadOf "https://github.com/"`.
-
+Both machines must run the same version: the peer handshake carries `wire`, and a
+mismatch is refused with `version-mismatch` naming both numbers instead of failing
+later with an undecryptable envelope.
 ## 2. Install it into that machine's profile
 
 `dsh plugin add` forwards to `pnpm`, which is not on `PATH` outside the app, so use the app's own
