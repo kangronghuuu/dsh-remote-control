@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0b0d12" />
+    <title>DSH Remote Control</title>
+    <link rel="icon" href="/icon.svg" />
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <section id="login" class="login" hidden>
+      <div class="login-card">
+        <img class="login-logo" src="/icon.svg" alt="" width="64" height="64" />
+        <h1>Remote Control</h1>
+        <p class="muted">
+          Enter the pairing code printed by the DeepSeek Harness Host. The code is
+          stored in <code>remote-control.json</code> inside your DSH home directory.
+        </p>
+        <form id="pair-form" autocomplete="off">
+          <label class="sr-only" for="code">Pairing code</label>
+          <input
+            id="code"
+            name="code"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            maxlength="12"
+            placeholder="000000"
+            autocomplete="one-time-code"
+            spellcheck="false"
+            required
+          />
+          <button type="submit" id="pair-submit">Pair this device</button>
+        </form>
+        <p id="pair-error" class="error" role="alert" hidden></p>
+        <p class="muted tiny">
+          This page can send prompts and stop turns on the paired Host. Keep the URL
+          and code to yourself.
+        </p>
+      </div>
+    </section>
+
+    <section id="app" class="app" hidden>
+      <header class="bar">
+        <button id="menu" class="icon-button" type="button" aria-label="Sessions" aria-controls="drawer" aria-expanded="false">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+            <path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+          </svg>
+        </button>
+        <div class="bar-title">
+          <span id="session-title">No session</span>
+          <span id="session-meta" class="muted tiny"></span>
+        </div>
+        <button id="config" class="icon-button" type="button" aria-label="Session settings">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path d="M4 8h10M18 8h2M4 16h2M10 16h10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+            <circle cx="16" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7" />
+            <circle cx="8" cy="16" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7" />
+          </svg>
+        </button>
+        <span id="status" class="status" title="Stream status"><i></i><span>idle</span></span>
+      </header>
+
+      <div id="scrim" class="scrim" hidden></div>
+      <aside id="drawer" class="drawer" hidden>
+        <div class="drawer-head">
+          <strong>Sessions</strong>
+          <div class="drawer-actions">
+            <button id="new-session" class="ghost-button" type="button">New</button>
+            <button id="close-drawer" class="icon-button drawer-close" type="button" aria-label="Close session list">×</button>
+          </div>
+        </div>
+        <div id="session-list" class="session-list"></div>
+        <div class="drawer-foot">
+          <button id="logout" class="link-button" type="button">Forget this device</button>
+        </div>
+      </aside>
+
+      <main id="log" class="log" aria-live="polite">
+        <button id="load-earlier" class="load-earlier" type="button" hidden>Load earlier</button>
+        <div id="empty" class="empty">
+          <p>Pick a session from the list, or create a new one.</p>
+        </div>
+      </main>
+
+      <div id="scroll-jump" class="scroll-jump" hidden>
+        <button id="scroll-top" class="scroll-jump-button" type="button" aria-label="Scroll to top">↑</button>
+        <button id="scroll-bottom" class="scroll-jump-button" type="button" aria-label="Scroll to bottom">↓</button>
+      </div>
+
+      <div id="attachments" class="attachments" hidden></div>
+      <div id="queue" class="queue" hidden></div>
+
+      <div id="mode-row" class="mode-row" hidden>
+        <div id="mode-switch" class="mode-switch" role="group" aria-label="Delivery mode">
+          <button type="button" data-mode="queue" aria-pressed="true">Queue</button>
+          <button type="button" data-mode="steer" aria-pressed="false">Steer</button>
+        </div>
+      </div>
+
+      <form id="composer" class="composer">
+        <button id="attach" class="icon-button attach" type="button" aria-label="Attach a file">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path d="M8 12.5V7a3.5 3.5 0 1 1 7 0v7.5a5.5 5.5 0 0 1-11 0V8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+          </svg>
+        </button>
+        <input id="file-input" type="file" multiple hidden />
+        <textarea id="input" rows="1" placeholder="Message the agent…" enterkeyhint="send"></textarea>
+        <button id="stop" class="stop" type="button" hidden>Stop</button>
+        <button id="send" class="send" type="submit">Send</button>
+      </form>
+
+      <div id="file-view" class="sheet" hidden>
+        <div class="sheet-card" role="dialog" aria-label="File preview">
+          <div class="sheet-head">
+            <strong id="file-title">File</strong>
+            <button id="file-close" class="icon-button drawer-close" type="button" aria-label="Close preview">×</button>
+          </div>
+          <div id="file-body" class="file-body"></div>
+        </div>
+      </div>
+
+      <div id="config-sheet" class="sheet" hidden>
+        <div class="sheet-card" role="dialog" aria-label="Session settings">
+          <div class="sheet-head">
+            <strong>Session settings</strong>
+            <button id="config-close" class="icon-button drawer-close" type="button" aria-label="Close settings">×</button>
+          </div>
+          <label class="field">
+            <span>Model</span>
+            <select id="model-select"></select>
+          </label>
+          <label class="field">
+            <span>Permission</span>
+            <select id="permission-select"></select>
+          </label>
+          <label class="field field-row">
+            <span>Plan mode</span>
+            <input id="plan-toggle" type="checkbox" />
+          </label>
+          <p id="config-status" class="muted tiny"></p>
+        </div>
+      </div>
+    </section>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
