@@ -32,7 +32,7 @@ export function verifyAction(secret, requestId, decision, signature) {
 
 export function normalizeNotify(raw) {
   const source = raw && typeof raw === 'object' ? raw : {}
-  const kind = source.kind === 'ntfy' ? 'ntfy' : source.kind === 'webhook' ? 'webhook' : 'none'
+  const kind = ['ntfy', 'webhook', 'mailgun'].includes(source.kind) ? source.kind : 'none'
   const events = Array.isArray(source.events) && source.events.length > 0
     ? source.events.filter((entry) => typeof entry === 'string')
     : DEFAULT_EVENTS
@@ -42,6 +42,9 @@ export function normalizeNotify(raw) {
       if (typeof value === 'string' && /^[A-Za-z0-9-]+$/.test(key)) headers[key] = value
     }
   }
+  const apiUrl = typeof source.apiUrl === 'string' && source.apiUrl.trim() !== ''
+    ? source.apiUrl.trim().replace(/\/+$/, '')
+    : 'https://api.mailgun.net'
   return {
     kind,
     url: typeof source.url === 'string' ? source.url.trim() : '',
@@ -51,6 +54,13 @@ export function normalizeNotify(raw) {
     baseUrl: typeof source.baseUrl === 'string' ? source.baseUrl.trim().replace(/\/+$/, '') : '',
     events,
     priority: Number.isInteger(source.priority) ? source.priority : 4,
+    // Direct mail: the Host talks to the mail provider itself, so no relay
+    // service has to be deployed or maintained just to forward a notice.
+    to: typeof source.to === 'string' ? source.to.trim() : '',
+    from: typeof source.from === 'string' ? source.from.trim() : '',
+    domain: typeof source.domain === 'string' ? source.domain.trim() : '',
+    apiKey: typeof source.apiKey === 'string' ? source.apiKey.trim() : '',
+    apiUrl,
   }
 }
 
@@ -58,7 +68,9 @@ export function createNotifier({ config, secret, log = console } = {}) {
   const settings = normalizeNotify(config)
   const events = new Set(settings.events)
 
-  const enabled = (settings.kind === 'ntfy' || settings.kind === 'webhook') && /^https?:\/\//i.test(settings.url)
+  const enabled = settings.kind === 'mailgun'
+    ? Boolean(settings.to && settings.domain && settings.apiKey)
+    : (settings.kind === 'ntfy' || settings.kind === 'webhook') && /^https?:\/\//i.test(settings.url)
 
   function wants(event) {
     return enabled && events.has(event)
@@ -132,8 +144,78 @@ export function createNotifier({ config, secret, log = console } = {}) {
     return body
   }
 
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (char) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]
+    ))
+  }
+
+  /**
+   * Direct mail from the Host: the recipient, sender and provider key all live
+   * in the Host's own settings, so no external service has to store or forward
+   * the notification. Action buttons are the same signed links as the other
+   * channels.
+   */
+  function emailMessage(payload) {
+    const actions = Array.isArray(payload.links) ? payload.links : []
+    const subject = `[DSH] ${payload.title || 'notification'}`
+    const lines = [payload.message || '']
+    if (payload.toolName) lines.push(`Tool: ${payload.toolName}`)
+    if (actions.length > 0) lines.push('', ...actions.map((link) => `${link.label}: ${link.url}`))
+    const buttons = actions
+      .map((link) => `<a href="${escapeHtml(link.url)}" style="display:inline-block;margin:0 8px 8px 0;padding:10px 16px;border-radius:8px;background:#3b6cf6;color:#ffffff;text-decoration:none;font-weight:600">${escapeHtml(link.label)}</a>`)
+      .join('')
+    const html = [
+      '<div style="font:16px system-ui,-apple-system,Segoe UI,sans-serif;color:#1b1f27;background:#f6f7fb;padding:18px;border-radius:12px">',
+      `<h2 style="margin:0 0 8px;font-size:18px">${escapeHtml(payload.title || 'DSH notification')}</h2>`,
+      `<p style="margin:0 0 12px;white-space:pre-wrap">${escapeHtml(payload.message || '')}</p>`,
+      payload.toolName ? `<p style="margin:0 0 12px;color:#5b6472;font-size:13px">Tool: ${escapeHtml(payload.toolName)}</p>` : '',
+      buttons,
+      '</div>',
+    ].join('')
+    return { subject, text: lines.join('\n'), html }
+  }
+
+  async function sendMailgun(payload) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+    timer.unref?.()
+    try {
+      const message = emailMessage(payload)
+      const from = settings.from && settings.from.includes('@') ? settings.from : `postmaster@${settings.domain}`
+      const form = new URLSearchParams({
+        from,
+        to: settings.to,
+        subject: message.subject,
+        text: message.text,
+        html: message.html,
+      })
+      const response = await fetch(`${settings.apiUrl}/v3/${settings.domain}/messages`, {
+        method: 'POST',
+        headers: {
+          authorization: `Basic ${Buffer.from(`api:${settings.apiKey}`).toString('base64')}`,
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        body: form.toString(),
+        signal: controller.signal,
+      })
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '')
+        log.warn?.(`[remote-control] mailgun send failed with HTTP ${response.status}: ${detail.slice(0, 200)}`)
+        return { ok: false, error: `mailgun-http-${response.status}` }
+      }
+      return { ok: true }
+    } catch (error) {
+      log.warn?.(`[remote-control] mailgun send failed: ${error?.message || error}`)
+      return { ok: false, error: error?.message || String(error) }
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
   async function publish(payload) {
     if (!enabled) return { ok: false, error: 'notifier-disabled' }
+    if (settings.kind === 'mailgun') return sendMailgun(payload)
     let body
     let endpoint = settings.url
     if (settings.kind === 'ntfy') {
@@ -223,6 +305,12 @@ export function createNotifier({ config, secret, log = console } = {}) {
     publish,
     notifyRequest,
     linksFor,
-    stats: () => ({ kind: settings.kind, enabled, events: [...events], hasActions: Boolean(settings.baseUrl) }),
+    stats: () => ({
+      kind: settings.kind,
+      enabled,
+      events: [...events],
+      hasActions: Boolean(settings.baseUrl),
+      ...(settings.kind === 'mailgun' ? { to: settings.to, domain: settings.domain, hasKey: settings.apiKey !== '' } : {}),
+    }),
   }
 }
