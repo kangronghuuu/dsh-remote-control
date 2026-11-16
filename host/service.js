@@ -376,7 +376,10 @@ export function createServiceManager({
       enabled: state.enabled,
       provider: state.provider,
       endpoint: state.endpoint,
-      healthy: state.healthy,
+      // `lan-only` publishes no endpoint on purpose, so the health probe has
+      // nothing to check; reporting it as unhealthy made the Devices panel show
+      // a red badge for the normal, working configuration.
+      healthy: state.provider === 'lan-only' ? true : state.healthy,
       since: state.since,
       lastError: state.lastError,
       restarts: state.restarts,

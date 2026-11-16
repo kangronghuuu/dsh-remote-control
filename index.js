@@ -723,6 +723,12 @@ export function apply(ctx, rawConfig) {
       const body = await readJson(req)
       return json(res, 200, fabric.revoke(String(body?.deviceId || '')))
     }
+    const rehandshake = action.match(/^\/peer\/([^/]+)\/rehandshake$/)
+    if (rehandshake && req.method === 'POST') {
+      const deviceId = decodeURIComponent(rehandshake[1])
+      const result = await fabric.rehandshake(deviceId)
+      return json(res, result.ok ? 200 : 409, result)
+    }
     if (action === '/scopes' && req.method === 'POST') {
       const body = await readJson(req)
       return json(res, 200, fabric.setScopes(String(body?.deviceId || ''), body?.scopes))

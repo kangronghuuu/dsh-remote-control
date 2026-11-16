@@ -412,19 +412,33 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
     // process knew before the restart needs a fresh handshake. The lower device
     // id initiates first; the higher one only steps in if that did not land, so
     // two simultaneous restarts do not rotate over each other.
+    // Two one-shot attempts are not enough: a peer that was still restarting at
+    // that moment stayed on a stale key and every later call failed with
+    // bad-envelope until the Host itself restarted. Keep retrying on a slow tick
+    // while any approved peer still lacks an ephemeral.
     const refreshMs = Number.isInteger(config.channelRefreshMs) ? config.channelRefreshMs : 2500
+    const refreshRetryMs = Math.max(refreshMs * 12, 30_000)
     const refreshOne = () => {
+      let missing = 0
       for (const deviceId of approvals.keys()) {
         if (ephemerals.has(deviceId)) continue
         const rotatedAt = approvals.get(deviceId)?.rotatedAt
         if (rotatedAt && Date.now() - rotatedAt < 60_000) continue
+        missing += 1
         rehandshakePeer(deviceId).catch(() => { /* peer offline */ })
       }
+      return missing
     }
-    const firstRefresh = refreshMs > 0 ? setTimeout(refreshOne, refreshMs) : undefined
-    const secondRefresh = refreshMs > 0 ? setTimeout(refreshOne, refreshMs + 5500) : undefined
-    firstRefresh?.unref?.()
-    secondRefresh?.unref?.()
+    let refreshTimer
+    const scheduleRefresh = (delayMs) => {
+      const timer = setTimeout(() => {
+        const missing = refreshOne()
+        if (missing > 0) scheduleRefresh(refreshRetryMs)
+      }, delayMs)
+      timer.unref?.()
+      return timer
+    }
+    const firstRefresh = refreshMs > 0 ? scheduleRefresh(refreshMs) : undefined
 
     const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true })
     sockets.push(socket)
