@@ -1,4 +1,14 @@
-﻿node_modules/
+node_modules/
 *.tgz
 *.log
 .DS_Store
+# local runtime state and secrets - never commit these
+remote-control-settings.json
+remote-control.json
+remote-control-peers.json
+remote-control-relay.json
+remote-control-identity.json
+.env
+.env.*
+*.pem
+*.key
