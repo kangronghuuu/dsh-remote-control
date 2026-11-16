@@ -1,4 +1,4 @@
-﻿# Install on another desktop
+# Install on another desktop
 
 The plugin is self-contained: `index.js`, `client.js`, `host/`, `web/`, `locale/`, `icon.svg`.
 Nothing here refers to the machine it was built on.

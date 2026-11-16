@@ -1,4 +1,4 @@
-﻿# @kangronghuuu/dsh-remote-control
+# @kangronghuuu/dsh-remote-control
 
 Control other DSH desktops from the one you are using.
 

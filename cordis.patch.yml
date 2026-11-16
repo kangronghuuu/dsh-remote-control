@@ -1,4 +1,4 @@
-﻿- insert:
+- insert:
     - id: remote-control
       name: '@kangronghuuu/dsh-remote-control'
 
