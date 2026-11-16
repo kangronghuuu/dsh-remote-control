@@ -3,10 +3,34 @@
 The plugin is self-contained: `index.js`, `client.js`, `host/`, `web/`, `locale/`, `icon.svg`.
 Nothing here refers to the machine it was built on.
 
-## 1. Copy the package
+## 1. Get the package onto that machine
 
-Copy this whole `dsh-remote-control` folder (or the zip built from it) to the other desktop, for
-example to `C:\Users\<you>\dsh-remote-control`.
+The plugin is self-contained: `index.js`, `client.js`, `host/`, `web/`, `locale/`, `icon.svg`.
+Nothing here refers to the machine it was built on. Three ways to ship it, pick one:
+
+**A. Private repository (recommended — versions stay comparable)**
+
+```bash
+git clone git@github.com:kangronghuuu/dsh-remote-control.git ~/dsh-remote-control
+```
+
+Update later with `git -C ~/dsh-remote-control pull`, then reinstall the profile dependency.
+
+**B. Tarball (no git, no registry)**
+
+```bash
+npm pack                       # on the source machine -> local-dsh-remote-control-0.5.4.tgz
+pnpm add /path/to/local-dsh-remote-control-0.5.4.tgz
+```
+
+**C. Git dependency inside the profile**
+
+```json
+"@local/dsh-remote-control": "github:kangronghuuu/dsh-remote-control#v0.5.4"
+```
+
+pnpm needs credentials for a private repo: either an SSH key on the machine, or
+`git config --global url."https://<token>@github.com/".insteadOf "https://github.com/"`.
 
 ## 2. Install it into that machine's profile
 
@@ -36,7 +60,24 @@ If you prefer doing it by hand, add the dependency and the bundle entry to
 }
 ```
 
+For a tarball install use the absolute path instead of `link:`:
+
+```json
+"@local/dsh-remote-control": "file:C:/Users/<you>/local-dsh-remote-control-0.5.4.tgz"
+```
+
 then run `pnpm install` in that profile directory and restart DSH.
+
+### Version parity
+
+Both machines must run the same version. The handshake carries `wire` (see
+`host/crypto.js: WIRE_VERSION`); a peer that speaks a different version is refused with
+`version-mismatch` naming both numbers, instead of failing later with an undecryptable
+envelope. Check the installed version with:
+
+```bash
+node -p "require('./package.json').version"
+```
 
 ## 3. Connect the two machines
 
