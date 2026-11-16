@@ -1,6 +1,6 @@
 {
     "name":  "dsh-remote-control-plugin",
-    "version":  "0.6.8",
+    "version":  "0.6.9",
     "type":  "module",
     "description":  "Remote control for DSH: a Devices panel that discovers other DSH desktops signed into the same account, pairs with them once, and drives their sessions.",
     "exports":  {

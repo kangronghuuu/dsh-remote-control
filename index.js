@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto'
 import { mkdir, readFile, realpath, stat as statOf, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { createServer as createHttpServer } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import { isIP } from 'node:net'
@@ -543,6 +544,34 @@ export function apply(ctx, rawConfig) {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
     const action = url.pathname.slice('/remote-control/api'.length)
 
+    if (action === '/notify' && req.method === 'GET') {
+      return json(res, 200, { config: notifyView(config.notify), stats: notifier?.stats?.() ?? null })
+    }
+    if (action === '/notify' && req.method === 'POST') {
+      await ready
+      const body = await readJson(req)
+      const patch = sanitizeNotifyPatch(body)
+      const current = readSettingsFile(settingsFile, log)
+      const merged = { ...current, notify: { ...(current.notify ?? {}), ...patch } }
+      if (!writeSettingsFile(settingsFile, merged, log)) {
+        return json(res, 500, { error: 'settings-write-failed' })
+      }
+      config.notify = normalizeNotify(merged.notify)
+      // Rebuild the notifier so the new channel works without a restart.
+      notifier = createNotifier({ config: config.notify, secret: state.secret, log })
+      return json(res, 200, { ok: true, config: notifyView(config.notify), stats: notifier.stats() })
+    }
+    if (action === '/notify/test' && req.method === 'POST') {
+      await ready
+      if (!notifier) return json(res, 503, { error: 'not-ready' })
+      const result = await notifier.publish({
+        kind: 'question',
+        title: 'DSH test notification',
+        message: 'Delivery works. You can ignore this message.',
+        links: [],
+      })
+      return json(res, result.ok ? 200 : 502, result)
+    }
     if (action === '/state' && req.method === 'GET') {
       const snapshot = fabric.snapshot()
       const urls = relayCore ? shareUrls() : []
@@ -1783,6 +1812,59 @@ function formatHost(host) {
 /* ------------------------------------------------------------------ */
 /* request helpers                                                     */
 /* ------------------------------------------------------------------ */
+
+/** Config safe to show in the GUI: secrets collapse to booleans. */
+function notifyView(raw) {
+  const value = normalizeNotify(raw)
+  return {
+    kind: value.kind,
+    events: value.events,
+    baseUrl: value.baseUrl,
+    to: value.to,
+    from: value.from,
+    smtpHost: value.smtpHost,
+    smtpPort: value.smtpPort,
+    smtpUser: value.smtpUser,
+    hasSmtpPass: value.smtpPass !== '',
+    domain: value.domain,
+    hasApiKey: value.apiKey !== '',
+    apiUrl: value.apiUrl,
+    url: value.url,
+    topic: value.topic,
+    hasToken: value.token !== '',
+  }
+}
+
+/** Only the notification keys the form may change, with types enforced. */
+function sanitizeNotifyPatch(input) {
+  const allowed = ['kind', 'events', 'baseUrl', 'to', 'from', 'smtpHost', 'smtpPort', 'smtpUser', 'smtpPass', 'domain', 'apiKey', 'apiUrl', 'url', 'topic', 'token']
+  const patch = {}
+  for (const key of allowed) {
+    const value = input?.[key]
+    if (value === undefined) continue
+    if (key === 'events') {
+      if (Array.isArray(value)) patch.events = value.filter((entry) => entry === 'approval' || entry === 'question')
+    } else if (key === 'smtpPort') {
+      const port = Number(value)
+      if (Number.isInteger(port) && port > 0 && port < 65536) patch.smtpPort = port
+    } else if (typeof value === 'string') {
+      patch[key] = value.trim()
+    }
+  }
+  return patch
+}
+
+/** Persist the local settings file: UTF-8 without BOM, owner-only. */
+function writeSettingsFile(file, data, log) {
+  try {
+    mkdirSync(path.dirname(file), { recursive: true })
+    writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
+    return true
+  } catch (error) {
+    log?.warn?.(`[remote-control] could not write ${file}: ${error?.message || error}`)
+    return false
+  }
+}
 
 /**
  * Read the plugin's own settings file. The Desktop app rewrites the profile

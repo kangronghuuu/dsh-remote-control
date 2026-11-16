@@ -579,6 +579,9 @@ window.__ModuleLoader__.load({
       const [sessionId, setSessionId] = useState(null)
       const [notice, setNotice] = useState(null)
       const [wizardSkipped, setWizardSkipped] = useState(false)
+      const [notify, setNotify] = useState(null)
+      const [notifyStatus, setNotifyStatus] = useState(null)
+      const [notifyBusy, setNotifyBusy] = useState(false)
       const savedTarget = useRef(readSavedTarget())
       const restoredTarget = useRef(false)
       const scrollPos = useRef({
@@ -803,6 +806,104 @@ window.__ModuleLoader__.load({
       const self = state?.self
       const relay = state?.relay
 
+      const loadNotify = useCallback(async () => {
+        try {
+          const value = await api('/remote-control/api/notify')
+          setNotify(value.config ?? null)
+        } catch (failure) {
+          setNotifyStatus({ bad: true, text: failure.message })
+        }
+      }, [])
+      useEffect(() => { loadNotify().catch(() => {}) }, [loadNotify])
+
+      const patchNotify = useCallback((key, value) => {
+        setNotify((current) => ({ ...(current ?? {}), [key]: value }))
+      }, [])
+
+      const saveNotify = useCallback(async () => {
+        if (!notify) return
+        const payload = { ...notify }
+        delete payload.hasSmtpPass
+        delete payload.hasApiKey
+        delete payload.hasToken
+        // A blank secret field means "keep the stored one".
+        for (const key of ['smtpPass', 'apiKey', 'token']) {
+          if (!payload[key]) delete payload[key]
+        }
+        setNotifyBusy(true)
+        setNotifyStatus(null)
+        try {
+          const value = await api('/remote-control/api/notify', payload)
+          setNotify(value.config ?? null)
+          setNotifyStatus({
+            bad: value.stats?.enabled !== true,
+            text: value.stats?.enabled === true ? 'Saved — notifications are active' : 'Saved, but the channel is still incomplete',
+          })
+        } catch (failure) {
+          setNotifyStatus({ bad: true, text: failure.message })
+        }
+        setNotifyBusy(false)
+      }, [notify])
+
+      const testNotify = useCallback(async () => {
+        setNotifyBusy(true)
+        setNotifyStatus(null)
+        try {
+          await api('/remote-control/api/notify/test', {})
+          setNotifyStatus({ bad: false, text: 'Test message sent — check the inbox' })
+        } catch (failure) {
+          setNotifyStatus({ bad: true, text: failure.message })
+        }
+        setNotifyBusy(false)
+      }, [])
+
+      const notifyField = (label, key, options = {}) => h('label', {
+        key,
+        style: { ...S.meta, display: 'flex', flexDirection: 'column', gap: '3px' },
+      },
+        label,
+        h('input', {
+          style: { ...S.field, minWidth: '170px' },
+          type: options.secret ? 'password' : 'text',
+          value: notify?.[key] ?? '',
+          placeholder: options.secret && notify?.[`has${key === 'smtpPass' ? 'SmtpPass' : key === 'apiKey' ? 'ApiKey' : 'Token'}`]
+            ? '•••••• (leave blank to keep)'
+            : (options.placeholder ?? ''),
+          onChange: (event) => patchNotify(key, event.target.value),
+        }),
+      )
+
+      const notifyFields = () => {
+        const kind = notify?.kind
+        if (kind === 'smtp') {
+          return [
+            notifyField('Host', 'smtpHost', { placeholder: 'smtp.gmail.com' }),
+            notifyField('Port', 'smtpPort'),
+            notifyField('User', 'smtpUser'),
+            notifyField('App password', 'smtpPass', { secret: true }),
+            notifyField('From', 'from'),
+            notifyField('To', 'to'),
+            notifyField('Base URL', 'baseUrl'),
+          ]
+        }
+        if (kind === 'mailgun') {
+          return [
+            notifyField('Domain', 'domain'),
+            notifyField('API key', 'apiKey', { secret: true }),
+            notifyField('From', 'from'),
+            notifyField('To', 'to'),
+            notifyField('Base URL', 'baseUrl'),
+          ]
+        }
+        if (kind === 'webhook') {
+          return [notifyField('URL', 'url'), notifyField('Bearer token', 'token', { secret: true }), notifyField('Base URL', 'baseUrl')]
+        }
+        if (kind === 'ntfy') {
+          return [notifyField('Server', 'url'), notifyField('Topic', 'topic'), notifyField('Base URL', 'baseUrl')]
+        }
+        return [notifyField('Base URL', 'baseUrl')]
+      }
+
       // Prefer a reachable non-loopback name: a phone scan should never encode
       // 127.0.0.1, and the tailnet name also beats a bare LAN address.
       const pairingUrls = state?.pairing?.urls ?? []
@@ -893,6 +994,32 @@ window.__ModuleLoader__.load({
                 }, pairScan),
               )
               : null,
+          )
+          : null,
+        notify
+          ? h('div', { style: { ...S.notice, display: 'flex', flexDirection: 'column', gap: '10px' } },
+            h('div', { style: { display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' } },
+              h('span', { style: { fontWeight: 600 } }, 'Notifications'),
+              h('span', { style: S.meta }, 'approval / question reach you out of band — credentials stay in this Host'),
+            ),
+            h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' } },
+              h('label', { style: { ...S.meta, display: 'flex', flexDirection: 'column', gap: '3px' } },
+                'Channel',
+                h('select', {
+                  style: S.field,
+                  value: notify.kind,
+                  onChange: (event) => patchNotify('kind', event.target.value),
+                }, ['none', 'smtp', 'mailgun', 'webhook', 'ntfy'].map((kind) => h('option', { key: kind, value: kind }, kind))),
+              ),
+              ...notifyFields(),
+            ),
+            h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
+              h('button', { type: 'button', style: S.button, disabled: notifyBusy, onClick: saveNotify }, 'Save'),
+              h('button', { type: 'button', style: S.button, disabled: notifyBusy || notify.kind === 'none', onClick: testNotify }, 'Send test'),
+              notifyStatus
+                ? h('span', { style: { ...S.meta, color: notifyStatus.bad ? '#ff8c8c' : '#7ee08b' } }, notifyStatus.text)
+                : null,
+            ),
           )
           : null,
         error ? h('div', { style: S.error }, error) : null,
