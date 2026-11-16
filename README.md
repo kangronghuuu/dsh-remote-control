@@ -216,3 +216,63 @@ browser page does the same for its session.
   `$DSH_HOME/remote-control.json`.
 - Approvals that arrive while no Devices panel is open stay pending for up to 10 minutes.
 
+## Notifications (optional)
+
+When an approval or a question is parked, the Host can notify you out of band, so you can answer
+from a phone lock screen instead of opening the page.
+
+Configure it in the Host's own settings file — `$DSH_HOME/remote-control-settings.json` — and never
+in the profile patch layer. That file is local, git-ignored, and the only place credentials belong.
+Every user configures **their own** mailbox or provider; nothing is shared with the maintainer.
+
+```json
+{
+  "notify": {
+    "kind": "smtp",
+    "to": "you@example.com",
+    "from": "you@example.com",
+    "smtpHost": "smtp.gmail.com",
+    "smtpPort": 465,
+    "smtpUser": "you@example.com",
+    "smtpPass": "<your app password>",
+    "baseUrl": "https://your-host.tailnet-name.ts.net",
+    "events": ["approval", "question"]
+  }
+}
+```
+
+### Direct SMTP (`kind: "smtp"`)
+
+Talks to the mailbox directly, with no relay service in between. Gmail needs an **app password**
+(two-step verification on), not the account password. Port `465` uses implicit TLS; `587`
+negotiates STARTTLS. `from` defaults to the SMTP user when omitted.
+
+### Mailgun (`kind: "mailgun"`)
+
+```json
+{ "kind": "mailgun", "to": "you@example.com", "from": "postmaster@mg.example.com",
+  "domain": "mg.example.com", "apiKey": "<private API key or sending key>",
+  "apiUrl": "https://api.mailgun.net", "baseUrl": "https://your-host.tailnet-name.ts.net" }
+```
+
+Use the private API key or a domain sending key; a public validation key does not authenticate.
+Sandbox domains only deliver to recipients authorised in the Mailgun dashboard.
+
+### Webhook (`kind: "webhook"`) and ntfy (`kind: "ntfy"`)
+
+`webhook` POSTs a JSON payload to `url`, optionally with an `Authorization: Bearer <token>`.
+`ntfy` publishes a JSON message to the topic in `topic` (or the last path segment of `url`) and
+renders the action links as buttons in the ntfy app.
+
+### Security notes
+
+- Credentials belong only in the local settings file. Do not commit it, do not put it in a patch
+  layer, and do not paste it into an issue or a screenshot.
+- The action buttons are signed links bound to one request and one decision; they stop working as
+  soon as that request is answered or withdrawn.
+- `baseUrl` must be reachable from the device that opens the link — a tailnet name, a VPN address,
+  or a public URL.
+- The Host reports only whether a secret is configured (`hasKey` / `hasPass`), never its value, and
+  never logs the config.
+- Delivery targets come exclusively from this local file, never from a request, so the plugin
+  cannot be turned into a relay for someone else's traffic.

@@ -81,6 +81,18 @@ export function createNotifier({ config, secret, log = console } = {}) {
       ? Boolean(settings.to && settings.smtpHost && settings.smtpUser && settings.smtpPass)
       : (settings.kind === 'ntfy' || settings.kind === 'webhook') && /^https?:\/\//i.test(settings.url)
 
+  // A half-filled config is the most common setup mistake; name the missing
+  // fields once at start-up instead of dropping notifications silently.
+  if (settings.kind !== 'none' && !enabled) {
+    const required = settings.kind === 'smtp'
+      ? ['to', 'smtpHost', 'smtpUser', 'smtpPass']
+      : settings.kind === 'mailgun'
+        ? ['to', 'domain', 'apiKey']
+        : ['url']
+    const missing = required.filter((key) => !settings[key])
+    log.warn?.(`[remote-control] notify "${settings.kind}" is not active; missing: ${missing.join(', ') || 'nothing (check the url scheme)'}`)
+  }
+
   function wants(event) {
     return enabled && events.has(event)
   }
