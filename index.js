@@ -373,7 +373,7 @@ export function apply(ctx, rawConfig) {
         const cached = tailnetIdentities.get(peer.dnsName)
         if (cached) {
           if (cached !== self.deviceId) {
-            fabric.simulateAnnounce(cached, peer.dnsName, 443, 'https')
+            fabric.simulateAnnounce(cached, peer.dnsName, config.port, 'http')
             found += 1
           }
           continue
@@ -388,7 +388,7 @@ export function apply(ctx, rawConfig) {
           if (typeof identity.deviceId !== 'string' || identity.deviceId === '' || identity.deviceId === self.deviceId) continue
           tailnetIdentities.set(peer.dnsName, identity.deviceId)
           // port 443 over https: the tailnet serves the listener behind TLS.
-          fabric.simulateAnnounce(identity.deviceId, peer.dnsName, 443, 'https')
+          fabric.simulateAnnounce(identity.deviceId, peer.dnsName, config.port, 'http')
           found += 1
         } catch {
           // not a Host, offline, or no certificate - nothing to seed

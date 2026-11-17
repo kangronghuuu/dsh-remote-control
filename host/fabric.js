@@ -17,6 +17,8 @@ const ANNOUNCE_INTERVAL_MS = 4000
 const PEER_TTL_MS = 15000
 const REQUEST_TTL_MS = 10 * 60 * 1000
 const CLOCK_SKEW_MS = 5 * 60 * 1000
+/** Statuses that mean "the peer answered", as opposed to the relay failing. */
+const PEER_LEVEL_STATUS = new Set([400, 401, 403, 409, 413, 422, 429])
 // Upload chunks carry up to 1 MiB of base64 (~1.4 MiB of JSON), above the
 // default body cap; the relay's own per-message cap stays at 2 MiB.
 const UPLOAD_BODY_BYTES = 4 * 1024 * 1024
@@ -1142,7 +1144,10 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
         return { lane: 'lan', result }
       }, () => undefined)
       const relayPromise = relayCall(peer, method, pathname, body, secret)
-        .then((result) => ((result.ok || result.status !== 503) ? { lane: 'relay', result } : undefined), () => undefined)
+        // A relay-level failure (unknown peer 404, timeout 504, 502) must not win
+        // the race: it answers in ~1ms and would beat the real direct lane every
+        // time. Only a peer-level answer counts as a relay success.
+        .then((result) => ((result.ok || PEER_LEVEL_STATUS.has(result.status)) ? { lane: 'relay', result } : undefined), () => undefined)
       const winner = await firstSuccess([directPromise, relayPromise])
       if (winner) return finish(winner.result, winner.lane)
     }
