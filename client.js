@@ -7,7 +7,7 @@ window.__ModuleLoader__.load({
 
     const S = {
       chevron: { fontSize: '11px', lineHeight: 1, opacity: 0.75 },
-      page: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, color: 'var(--dsw-alias-label-primary)' },
+      page: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, minWidth: 0, overflow: 'hidden', color: 'var(--dsw-alias-label-primary)' },
       header: {
         display: 'flex', alignItems: 'center', gap: '10px', padding: '14px 18px',
         borderBottom: '1px solid var(--dsw-alias-border-l1)',
@@ -15,8 +15,8 @@ window.__ModuleLoader__.load({
       title: { fontSize: '15px', fontWeight: 600, margin: 0 },
       subtitle: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' },
       grow: { flex: 1 },
-      body: { display: 'flex', flex: 1, minHeight: 0 },
-      column: { display: 'flex', flexDirection: 'column', minHeight: 0 },
+      body: { display: 'flex', flex: 1, minHeight: 0, minWidth: 0 },
+      column: { display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 },
       list: { flex: 1, overflowY: 'auto', padding: '10px' },
       row: {
         display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px',
@@ -27,6 +27,16 @@ window.__ModuleLoader__.load({
       rowActive: { borderColor: 'var(--dsw-alias-brand-primary)' },
       name: { fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
       meta: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+      // Secondary text that must stay readable: wraps instead of truncating.
+      metaWrap: {
+        fontSize: '11px', color: 'var(--dsw-alias-label-secondary)',
+        whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', minWidth: 0,
+      },
+      // A chat title shrinks with the panel instead of widening it.
+      chatTitle: {
+        fontSize: '13px', fontWeight: 600, flex: 1, minWidth: 0,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      },
       chip: {
         fontSize: '11px', padding: '2px 8px', borderRadius: '999px',
         border: '1px solid var(--dsw-alias-border-l1)', color: 'var(--dsw-alias-label-secondary)',
@@ -47,10 +57,11 @@ window.__ModuleLoader__.load({
         border: '1px solid var(--dsw-alias-state-warn-primary)',
         background: 'var(--dsw-alias-bg-layer-1)', fontSize: '12px',
       },
-      log: { flex: 1, overflowY: 'auto', padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: '8px' },
+      log: { flex: 1, minHeight: 0, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: '8px' },
       bubble: {
         maxWidth: '78%', padding: '8px 11px', borderRadius: '12px', fontSize: '13px',
-        whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', border: '1px solid var(--dsw-alias-border-l1)',
+        whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word', minWidth: 0,
+        border: '1px solid var(--dsw-alias-border-l1)',
       },
       userBubble: { alignSelf: 'flex-end', background: 'var(--dsw-alias-bg-layer-2)' },
       assistantBubble: { alignSelf: 'flex-start', background: 'var(--dsw-alias-bg-layer-1)' },
@@ -78,7 +89,7 @@ window.__ModuleLoader__.load({
         padding: '1px 7px', borderRadius: '6px', fontSize: '10px', cursor: 'pointer',
         background: 'transparent', color: 'inherit', border: '1px solid var(--dsw-alias-border-l1)',
       },
-      modeRow: { display: 'flex', alignItems: 'center', gap: '6px', paddingBottom: '4px' },
+      modeRow: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', minWidth: 0, paddingBottom: '4px' },
       smallButton: {
         padding: '1px 8px', borderRadius: '6px', fontSize: '11px', lineHeight: '1.7', cursor: 'pointer',
         background: 'transparent', color: 'inherit', border: '1px solid var(--dsw-alias-border-l1)',
@@ -107,18 +118,19 @@ window.__ModuleLoader__.load({
       toolRow: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', alignSelf: 'flex-start' },
       note: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', alignSelf: 'center' },
       composer: {
-        display: 'flex', gap: '8px', alignItems: 'flex-end', padding: '10px 14px',
+        display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap', minWidth: 0, padding: '10px 14px',
         borderTop: '1px solid var(--dsw-alias-border-l1)',
       },
       input: {
-        flex: 1, resize: 'none', font: 'inherit', fontSize: '13px', padding: '8px 10px', minHeight: '38px',
+        flex: 1, minWidth: 0, resize: 'none', font: 'inherit', fontSize: '13px', padding: '8px 10px', minHeight: '38px',
         maxHeight: '140px', borderRadius: '10px', color: 'var(--dsw-alias-label-primary)',
         background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l1)',
       },
       empty: { margin: 'auto', padding: '24px', textAlign: 'center', fontSize: '13px', color: 'var(--dsw-alias-label-secondary)' },
       pane: { width: '300px', borderRight: '1px solid var(--dsw-alias-border-l1)' },
       field: {
-        font: 'inherit', fontSize: '12px', padding: '7px 9px', borderRadius: '8px', minWidth: '180px',
+        font: 'inherit', fontSize: '12px', padding: '7px 9px', borderRadius: '8px',
+        minWidth: 0, flex: '1 1 160px', maxWidth: '100%',
         color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-layer-2)',
         border: '1px solid var(--dsw-alias-border-l1)',
       },
@@ -508,7 +520,7 @@ window.__ModuleLoader__.load({
         h('div', { style: { fontWeight: 600, fontSize: 12 } },
           (item.kind === 'approval' ? 'Approval needed' : 'Question') + (item.toolName ? ' \u00b7 ' + item.toolName : '')),
         item.displayReason || item.reason
-          ? h('div', { style: { ...S.meta, whiteSpace: 'pre-wrap' } }, item.displayReason || item.reason)
+          ? h('div', { style: S.metaWrap }, item.displayReason || item.reason)
           : null,
         item.kind === 'approval'
           ? h('div', { style: { display: 'flex', gap: '8px' } },
@@ -923,12 +935,17 @@ window.__ModuleLoader__.load({
         )
         : null
 
-      return h('div', { style: { ...S.column, flex: 1, minHeight: 0 }, onPaste: handlePaste },
+      return h('div', { style: { ...S.column, flex: 1, minHeight: 0, minWidth: 0, width: '100%', maxWidth: '100%', overflow: 'hidden' }, onPaste: handlePaste },
         preview ? h(FileSheet, { peerId, ref: preview, onClose: () => setPreview(null) }) : null,
         h('div', {
-          style: { padding: '10px 18px', borderBottom: '1px solid var(--dsw-alias-border-l1)', fontSize: '13px', fontWeight: 600 },
-        }, title || sessionId),
-        h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
+          style: {
+            display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 18px',
+            borderBottom: '1px solid var(--dsw-alias-border-l1)', minWidth: 0,
+          },
+        },
+          h('span', { style: S.chatTitle, title: title || sessionId }, title || sessionId),
+        ),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', minWidth: 0 } },
           h('button', { type: 'button', style: S.smallButton, title: 'Scroll to top', onClick: () => scrollJump('top') }, '\u2191'),
           h('button', { type: 'button', style: S.smallButton, title: 'Scroll to bottom', onClick: () => scrollJump('bottom') }, '\u2193'),
           onNewSession
@@ -1004,7 +1021,7 @@ window.__ModuleLoader__.load({
             style: { ...S.queueButton, ...(mode === name ? S.primary : {}) , textTransform: 'capitalize' },
             onClick: () => setMode(name),
           }, name)),
-          h('span', { style: S.meta }, mode === 'steer' ? 'inject into the running turn' : 'wait until the turn ends'),
+          h('span', { style: { ...S.metaWrap, flex: '1 1 auto' } }, mode === 'steer' ? 'inject into the running turn' : 'wait until the turn ends'),
         ),
         pendingFiles.length > 0
           ? h('div', { style: S.pendingRow },
@@ -1770,7 +1787,7 @@ window.__ModuleLoader__.load({
               ? h(Collapsible, { title: 'Pairing', summary: 'code and QR for a new phone', storageKey: 'pairing', defaultOpen: false },
                   h('div', { style: { display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' } },
                 h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '240px' } },
-                  h('span', { style: S.meta }, 'Pairing code — enter it on the phone, or scan the code to pair automatically'),
+                  h('span', { style: S.metaWrap }, 'Pairing code — enter it on the phone, or scan the code to pair automatically'),
                   h('span', {
                     style: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '30px', letterSpacing: '8px', fontWeight: 600 },
                     onDblClick: () => { try { navigator.clipboard?.writeText(state.pairing.code) } catch { /* ignore */ } },
@@ -1800,7 +1817,7 @@ window.__ModuleLoader__.load({
                   )
                   : null,
                 h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '260px' } },
-                  h('span', { style: S.meta }, 'Rotating the code keeps paired browsers signed in; signing them out is the second button.'),
+                  h('span', { style: S.metaWrap }, 'Rotating the code keeps paired browsers signed in; signing them out is the second button.'),
                   h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
                     h('button', { type: 'button', style: S.button, disabled: busy === 'pairing', onClick: () => rotatePairing(false) }, 'Rotate code'),
                     h('button', { type: 'button', style: S.button, disabled: busy === 'pairing', onClick: () => rotatePairing(true) }, 'Rotate + sign out devices'),
@@ -1814,7 +1831,7 @@ window.__ModuleLoader__.load({
                   h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
                 h('div', { style: { display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' } },
                   h('span', { style: { fontWeight: 600 } }, 'Notifications'),
-                  h('span', { style: S.meta }, 'approval / question reach you out of band — credentials stay in this Host'),
+                  h('span', { style: { ...S.metaWrap, flex: '1 1 240px' } }, 'approval / question reach you out of band — credentials stay in this Host'),
                 ),
                 h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' } },
                   h('label', { style: { ...S.meta, display: 'flex', flexDirection: 'column', gap: '3px' } },
