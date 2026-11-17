@@ -1328,6 +1328,21 @@ window.__ModuleLoader__.load({
         if (sessionId) setSidebarOpen(false)
       }, [sessionId])
 
+      const rotatePairing = useCallback(async (rotateSecret) => {
+        if (rotateSecret && !window.confirm('Sign out every paired browser? Each phone will need the new code.')) return
+        setBusy('pairing')
+        try {
+          const value = await api('/remote-control/api/pairing/rotate', { rotateSecret })
+          setNotice(value?.secretRotated
+            ? 'Pairing rotated and every paired browser was signed out. New code: ' + value.code
+            : 'Pairing code rotated (paired browsers stay signed in). New code: ' + value.code)
+        } catch (failure) {
+          setError(failure.message)
+        }
+        setBusy(null)
+        refresh()
+      }, [refresh])
+
       const approve = useCallback(async (requestId) => {
         setBusy(requestId)
         try { await api('/remote-control/api/approve', { requestId }) } catch (failure) { setError(failure.message) }
@@ -1738,6 +1753,13 @@ window.__ModuleLoader__.load({
                     }, pairScan),
                   )
                   : null,
+                h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '260px' } },
+                  h('span', { style: S.meta }, 'Rotating the code keeps paired browsers signed in; signing them out is the second button.'),
+                  h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+                    h('button', { type: 'button', style: S.button, disabled: busy === 'pairing', onClick: () => rotatePairing(false) }, 'Rotate code'),
+                    h('button', { type: 'button', style: S.button, disabled: busy === 'pairing', onClick: () => rotatePairing(true) }, 'Rotate + sign out devices'),
+                  ),
+                ),
               ),
                 )
               : null,

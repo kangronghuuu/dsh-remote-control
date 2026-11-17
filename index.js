@@ -669,6 +669,22 @@ export function apply(ctx, rawConfig) {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
     const action = url.pathname.slice('/remote-control/api'.length)
 
+    if (action === '/pairing/rotate' && req.method === 'POST') {
+      await ready
+      const body = await readJson(req)
+      // The pairing code is only the entry secret: rotating it alone leaves every
+      // issued cookie valid. Rotating `secret` invalidates all of them (and all
+      // signed action links), so paired browsers must pair again with the new code.
+      const rotateSecret = body?.rotateSecret !== false
+      state.code = generateCode()
+      if (rotateSecret) {
+        state.secret = randomBytes(32).toString('hex')
+        notifier = createNotifier({ config: config.notify, secret: state.secret, log })
+      }
+      await persistState(stateFile, state, log)
+      log.warn('[remote-control] pairing rotated (secret rotated: ' + rotateSecret + ')')
+      return json(res, 200, { ok: true, code: state.code, secretRotated: rotateSecret })
+    }
     if (action === '/notify' && req.method === 'GET') {
       return json(res, 200, { config: notifyView(config.notify), stats: notifier?.stats?.() ?? null })
     }
@@ -1061,8 +1077,13 @@ export function apply(ctx, rawConfig) {
     }
 
     if (pathname === '/api/me') {
+      const authenticated = isAuthenticated(req, state.secret)
+      // A present-but-invalid cookie means this browser was signed out (typically
+      // a pairing rotation), as opposed to never having paired at all.
+      const hadCookie = Boolean(parseCookies(req.headers?.cookie)[COOKIE_NAME])
       return json(res, 200, {
-        authenticated: isAuthenticated(req, state.secret),
+        authenticated,
+        signedOut: !authenticated && hadCookie,
         name: 'DSH Remote Control',
         version: '0.1.0',
       })

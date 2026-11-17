@@ -139,15 +139,17 @@ async function boot() {
   try {
     const me = await request('/api/me')
     if (me.authenticated) startApp()
-    else showLogin()
+    else showLogin(me.signedOut === true)
   } catch {
     showLogin()
   }
 }
 
-function showLogin() {
+function showLogin(signedOut = false) {
   el.app.hidden = true
   el.login.hidden = false
+  const hint = $('pair-hint')
+  if (hint) hint.hidden = !signedOut
   el.code.focus()
 }
 
