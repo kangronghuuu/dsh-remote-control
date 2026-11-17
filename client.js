@@ -125,7 +125,7 @@ window.__ModuleLoader__.load({
       },
       sheetImage: { maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain', borderRadius: '8px', alignSelf: 'center' },
       sheetText: { margin: 0, padding: '8px', borderRadius: '8px', fontSize: '11px', whiteSpace: 'pre-wrap', maxHeight: '52vh', overflow: 'auto', background: 'var(--dsw-alias-bg-layer-3, rgba(127,127,127,.12))' },
-      pendingRow: { display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', padding: '6px 0' },
+      pendingRow: { display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', padding: '8px 12px', borderRadius: '10px', background: 'rgba(79,124,255,.10)' },
       pendingThumb: { width: '18px', height: '18px', borderRadius: '4px', objectFit: 'cover' },
       pendingChip: {
         display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '999px',
@@ -667,6 +667,7 @@ window.__ModuleLoader__.load({
       const [config, setConfig] = useState(null)
       const [configBusy, setConfigBusy] = useState(false)
       const seen = useRef(new Set())
+      const chatRoot = useRef(null)
       const logRef = useRef(null)
       // Turn boundaries, so the transcript can be navigated turn by turn.
       const turnMark = useRef({ pending: false, count: 0 })
@@ -776,17 +777,65 @@ window.__ModuleLoader__.load({
       // Paste anywhere in the chat, not only while the textarea has focus: the
       // window-level fallthrough used to drop the file into the app's own
       // composer, where this page could never see it.
-      const handlePaste = useCallback((event) => {
+      const readPastedFiles = (transfer) => {
         const files = []
-        for (const item of event.clipboardData?.items ?? []) {
+        for (const item of transfer?.items ?? []) {
           if (item.kind !== 'file') continue
           const file = item.getAsFile()
           if (file) files.push(file)
         }
-        if (files.length === 0) return
+        // Some platforms only expose the list, not the item iterator.
+        if (files.length === 0) {
+          for (const file of transfer?.files ?? []) files.push(file)
+        }
+        return files
+      }
+
+      const handlePaste = useCallback((event) => {
+        const files = readPastedFiles(event.clipboardData)
+        if (files.length === 0) return false
         event.preventDefault()
         event.stopPropagation()
         addFiles(files)
+        return true
+      }, [addFiles])
+
+      // A capture-phase listener on the document runs before the shell's own
+      // handlers, but only acts while the focus is inside this chat: pasting into
+      // the app's main composer must keep working normally.
+      useEffect(() => {
+        const onPaste = (event) => {
+          const root = chatRoot.current
+          const target = event.target
+          const inChat = root && target instanceof Node && root.contains(target)
+          if (!inChat) return
+          handlePaste(event)
+        }
+        document.addEventListener('paste', onPaste, true)
+        return () => document.removeEventListener('paste', onPaste, true)
+      }, [handlePaste])
+
+      // Third fallback: an explicit button that reads the clipboard directly. On
+      // Electron this works even when the paste event was swallowed.
+      const pasteFromClipboard = useCallback(async () => {
+        try {
+          const items = await navigator.clipboard.read()
+          const files = []
+          for (const item of items) {
+            for (const type of item.types ?? []) {
+              if (!type.startsWith('image/')) continue
+              const blob = await item.getType(type)
+              files.push(new File([blob], 'pasted.' + type.split('/')[1].replace('jpeg', 'jpg'), { type }))
+            }
+          }
+          if (files.length === 0) {
+            setError('Nothing image-like on the clipboard.')
+            return
+          }
+          addFiles(files)
+        } catch {
+          setError('Clipboard read was blocked — use Attach or Ctrl+V.')
+        }
       }, [addFiles])
 
       const dropFiles = useCallback((event) => {
@@ -1058,7 +1107,7 @@ window.__ModuleLoader__.load({
         )
         : null
 
-      return h('div', { style: { ...S.column, flex: 1, minHeight: 0, minWidth: 0, width: '100%', maxWidth: '100%', overflow: 'hidden' }, onPaste: handlePaste },
+      return h('div', { ref: chatRoot, style: { ...S.column, flex: 1, minHeight: 0, minWidth: 0, width: '100%', maxWidth: '100%', overflow: 'hidden' }, onPaste: handlePaste },
         preview && typeof preview === 'string'
           ? h(PathSheet, { peerId, sessionId, filePath: preview, onClose: () => setPreview(null) })
           : preview
@@ -1176,7 +1225,7 @@ window.__ModuleLoader__.load({
         ),
         pendingFiles.length > 0
           ? h('div', { style: S.pendingRow },
-            h('span', { style: S.meta }, pendingFiles.length + ' file(s) ready to send'),
+            h('span', { style: { ...S.meta, fontWeight: 600 } }, 'Attached: ' + pendingFiles.length + ' file(s) — Ctrl+Enter to send'),
             pendingFiles.map((file, position) => h('span', { key: (file.name || 'file') + position, style: S.pendingChip },
             previewFor(file)
               ? h('img', { src: previewFor(file), alt: file.name || 'image', style: S.pendingThumb })
@@ -1230,6 +1279,12 @@ window.__ModuleLoader__.load({
               }
             },
           }),
+          h('button', {
+            type: 'button',
+            style: S.button,
+            title: 'Paste an image from the clipboard',
+            onClick: pasteFromClipboard,
+          }, 'Paste'),
           h('label', { style: { ...S.button, cursor: 'pointer' }, title: 'Attach files' },
             'Attach',
             h('input', {
