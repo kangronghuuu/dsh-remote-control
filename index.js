@@ -1430,8 +1430,10 @@ export function apply(ctx, rawConfig) {
       } catch {
         return json(res, 400, { error: 'bad-ref' })
       }
-      if (!ref || typeof ref !== 'object' || typeof ref.attachmentId !== 'string') {
-        return json(res, 400, { error: 'bad-ref' })
+      // A path-style reference is also accepted: some clients describe a file by
+      // path, and an older bundle can send one here by mistake.
+      if (!ref || typeof ref !== 'object' || (typeof ref.attachmentId !== 'string' && typeof ref.path !== 'string')) {
+        return json(res, 400, { error: 'bad-ref', message: 'Expected { attachmentId } or { path }.' })
       }
 
       const isImage = typeof ref.mediaType === 'string' && ref.mediaType.startsWith('image/')

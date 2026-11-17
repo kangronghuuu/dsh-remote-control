@@ -520,9 +520,22 @@ window.__ModuleLoader__.load({
       })
     }
 
-    function AttachmentImage({ peerId, ref }) {
+    /** True when a block actually carries a durable attachment reference. */
+    function hasAttachmentId(ref) {
+      return Boolean(ref && typeof ref === 'object' && typeof ref.attachmentId === 'string' && ref.attachmentId !== '')
+    }
+
+    /** A block may describe a file by path instead of by attachment id. */
+    function refPath(ref) {
+      if (!ref) return ''
+      if (typeof ref === 'string') return ref
+      return String(ref.path || ref.filePath || ref.name || '')
+    }
+
+    function AttachmentImage({ peerId, sessionId, ref }) {
       const [src, setSrc] = useState('')
       useEffect(() => {
+        if (!hasAttachmentId(ref)) return undefined
         let alive = true
         const url = '/remote-control/api/peer/' + encodeURIComponent(peerId) + '/attachment?ref=' + encodeURIComponent(JSON.stringify(ref))
         api(url).then((value) => {
@@ -531,7 +544,14 @@ window.__ModuleLoader__.load({
         }).catch(() => {})
         return () => { alive = false }
       }, [peerId, ref])
-      if (!src) return h('span', { style: S.meta }, ref?.name || 'image')
+      if (!src) {
+        // No usable id: show the path as a file reference instead of requesting a
+        // broken /attachment URL.
+        const filePath = refPath(ref)
+        return filePath
+          ? h(PathImage, { peerId, sessionId, filePath })
+          : h('span', { style: S.meta }, 'image')
+      }
       return h('img', {
         src,
         alt: ref?.name || 'image',
@@ -553,6 +573,10 @@ window.__ModuleLoader__.load({
       const [state, setState] = useState({ status: 'loading', text: '', dataUrl: '', mediaType: '', size: 0 })
       useEffect(() => {
         let alive = true
+        if (!filePath || !peerId) {
+          setState({ status: 'error', text: '', dataUrl: '', mediaType: '', size: 0 })
+          return undefined
+        }
         const binary = IMAGE_EXTENSIONS.test(filePath) || PDF_EXTENSION.test(filePath)
         const url = '/remote-control/api/peer/' + encodeURIComponent(peerId) + '/file?sessionId=' + encodeURIComponent(sessionId) + '&path=' + encodeURIComponent(filePath) + (binary ? '&raw=1' : '')
         api(url).then((value) => {
@@ -591,6 +615,10 @@ window.__ModuleLoader__.load({
     function FileSheet({ peerId, ref, onClose }) {
       const [state, setState] = useState({ status: 'loading', text: '', dataUrl: '' })
       useEffect(() => {
+        if (!hasAttachmentId(ref)) {
+          setState({ status: 'error', text: '', dataUrl: '' })
+          return undefined
+        }
         let alive = true
         const url = '/remote-control/api/peer/' + encodeURIComponent(peerId) + '/attachment?ref=' + encodeURIComponent(JSON.stringify(ref))
         api(url).then((value) => {
@@ -1435,7 +1463,7 @@ window.__ModuleLoader__.load({
         return h('div', { key: entry.key, style: { ...S.bubble, ...S.userBubble } },
           entry.text ? h('div', { style: { whiteSpace: 'pre-wrap' } }, entry.text) : null,
           entry.images?.length
-            ? h('div', { style: S.imageRow }, entry.images.map((ref, position) => h(AttachmentImage, { key: (ref.attachmentId || '') + position, peerId: context.peerId, ref })))
+            ? h('div', { style: S.imageRow }, entry.images.map((ref, position) => h(AttachmentImage, { key: (ref.attachmentId || '') + position, peerId: context.peerId, sessionId: context.sessionId, ref })))
             : null,
           visuals.images.length
             ? h('div', { style: S.imageRow }, visuals.images.map((ref, position) => h(PathImage, {
@@ -1460,7 +1488,7 @@ window.__ModuleLoader__.load({
         const visuals = splitVisualFiles(entry.files)
         return h('div', { key: entry.key, style: { ...S.bubble, ...S.assistantBubble } },
           entry.images?.length
-            ? h('div', { style: S.imageRow }, entry.images.map((ref, position) => h(AttachmentImage, { key: 'a' + position, peerId: context.peerId, ref })))
+            ? h('div', { style: S.imageRow }, entry.images.map((ref, position) => h(AttachmentImage, { key: 'a' + position, peerId: context.peerId, sessionId: context.sessionId, ref })))
             : null,
           visuals.images.length
             ? h('div', { style: S.imageRow }, visuals.images.map((ref, position) => h(PathImage, {
