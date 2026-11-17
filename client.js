@@ -715,7 +715,7 @@ window.__ModuleLoader__.load({
         if (!node || entries.length === 0) return
         restoredScroll.current = true
         if (typeof initialScrollTop === 'number' && initialScrollTop > 0) node.scrollTop = initialScrollTop
-      }, [entries])
+      }, [entries, running])
 
       // Image chips get a local thumbnail so a paste is visibly accepted.
       const previews = useRef(new Map())
@@ -796,12 +796,15 @@ window.__ModuleLoader__.load({
       // has to be visible; a line in the transcript is easy to miss.
       const [turnAlert, setTurnAlert] = useState(null)
       useEffect(() => {
+        // A turn that is still running has no end yet: that is normal, not an
+        // interruption, so the alert is only computed once the peer says idle.
         let lastStart = null
         let lastEnd = null
         for (const entry of entries) {
           if (entry.kind === 'turn-start') lastStart = entry
           else if (entry.kind === 'turn-end') lastEnd = entry
         }
+        if (running) { setTurnAlert(null); return }
         const seqOf = (entry) => Number(String(entry?.key || '').replace(/^e/, '')) || 0
         if (lastStart && (!lastEnd || seqOf(lastStart) > seqOf(lastEnd))) {
           setTurnAlert({ kind: 'interrupted', text: 'The last turn was interrupted (no completion was recorded).' })
@@ -844,6 +847,9 @@ window.__ModuleLoader__.load({
         try {
           const value = await api('/remote-control/api/peer/' + encodeURIComponent(peerId) + '/state?sessionId=' + encodeURIComponent(sessionId))
           setQueue(Array.isArray(value?.queue) ? value.queue : [])
+          // The Host knows whether the session is running; the replayed events do
+          // not always, so trust this poll over event-derived flags.
+          if (typeof value?.running === 'boolean') setRunning(value.running)
         } catch { /* peer has no state route */ }
       }, [peerId, sessionId])
       useEffect(() => {
@@ -1163,11 +1169,16 @@ window.__ModuleLoader__.load({
             style: S.input,
             rows: 1,
             value: draft,
-            placeholder: 'Message this device…',
+            placeholder: 'Message this device…  (Enter = newline · Ctrl+Enter = send)',
             onChange: (event) => setDraft(event.target.value),
 
             onKeyDown: (event) => {
-              if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send() }
+              // Enter is a newline here: prompts are often multi-line. Cmd/Ctrl+Enter
+              // sends, which matches the desktop conventions people already have.
+              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault()
+                send()
+              }
             },
           }),
           h('label', { style: { ...S.button, cursor: 'pointer' }, title: 'Attach files' },
