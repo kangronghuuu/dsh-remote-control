@@ -635,6 +635,15 @@ window.__ModuleLoader__.load({
       const [relayUrl, setRelayUrl] = useState('')
       const [relayKey, setRelayKey] = useState('')
       const [reachability, setReachability] = useState(null)
+      // Setup (service, pairing, notifications) is a separate tab so the chat
+      // keeps the whole page instead of scrolling past configuration cards.
+      const [view, setView] = useState(() => {
+        try { return window.localStorage.getItem('dsh-remote-control:view') === 'settings' ? 'settings' : 'chat' } catch { return 'chat' }
+      })
+      const switchView = (next) => {
+        setView(next)
+        try { window.localStorage.setItem('dsh-remote-control:view', next) } catch { /* ignore */ }
+      }
 
       const refresh = useCallback(async () => {
         try {
@@ -966,6 +975,18 @@ window.__ModuleLoader__.load({
             h('div', { style: S.subtitle },
               self ? `${self.deviceName} · ${shortAccount(self.userId)} · port ${self.port}` : 'Discovering…'),
           ),
+          h('div', { style: { display: 'flex', gap: '4px', padding: '2px', borderRadius: '8px', border: '1px solid var(--dsw-alias-line, #444)' } },
+            ...['chat', 'settings'].map((name) => h('button', {
+              key: name,
+              type: 'button',
+              style: {
+                ...S.button,
+                ...(view === name ? { ...S.primary } : { background: 'transparent', border: '1px solid transparent' }),
+                textTransform: 'capitalize',
+              },
+              onClick: () => switchView(name),
+            }, name)),
+          ),
           h('div', { style: S.grow }),
           h('span', { style: { ...S.chip, ...(relay?.connected ? S.chipOk : {}) } },
             relay?.connected ? `Relay · ${relay.peers}` : 'LAN only'),
@@ -979,97 +1000,101 @@ window.__ModuleLoader__.load({
             h('button', { type: 'button', style: S.button, onClick: () => setNotice(null) }, 'Dismiss'),
           )
           : null,
-        state?.service
-          ? h(Collapsible, { title: 'Service', summary: 'tunnel / LAN reachability', storageKey: 'service', defaultOpen: true },
-              h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
-            h('span', { style: { fontWeight: 600 } }, 'Service'),
-            h('span', { style: { ...S.chip, ...(state.service.healthy ? S.chipOk : S.chipWarn) } }, state.service.healthy ? 'healthy' : 'unhealthy'),
-            h('span', { style: S.meta }, state.service.provider + (state.service.since ? ' · up ' + uptimeText(state.service.since) : '')),
-            state.service.endpoint
-              ? h('span', { style: { ...S.meta, maxWidth: '320px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: state.service.endpoint }, state.service.endpoint)
-              : null,
-            state.service.lastError
-              ? h('span', { style: { ...S.chip, ...S.chipBad }, title: state.service.lastError.message }, state.service.lastError.code)
-              : null,
-            h('div', { style: { flex: 1 } }),
-            state.service.provision && !state.service.provision.installed
-              ? h('button', { type: 'button', style: S.button, disabled: busy === 'service', onClick: installTunnel }, 'Download & verify v' + state.service.provision.version)
-              : null,
-            h('button', { type: 'button', style: S.button, disabled: busy === 'service', onClick: () => serviceAction('start') }, 'Start'),
-            h('button', { type: 'button', style: S.button, disabled: busy === 'service', onClick: () => serviceAction('stop') }, 'Stop'),
-            state.service.endpoint
-              ? h('img', {
-                alt: 'Service URL QR',
-                src: '/remote-control/api/qr?text=' + encodeURIComponent(state.service.endpoint),
-                style: { width: '84px', height: '84px', background: '#fff', borderRadius: '8px', padding: '4px' },
-              })
-              : null,
-          ),
-            )
-          : null,
-        state?.pairing?.code
-          ? h(Collapsible, { title: 'Pairing', summary: 'code and QR for a new phone', storageKey: 'pairing', defaultOpen: false },
-              h('div', { style: { display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' } },
-            h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '240px' } },
-              h('span', { style: S.meta }, 'Pairing code — enter it on the phone, or scan the code to pair automatically'),
-              h('span', {
-                style: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '30px', letterSpacing: '8px', fontWeight: 600 },
-                onDblClick: () => { try { navigator.clipboard?.writeText(state.pairing.code) } catch { /* ignore */ } },
-              }, state.pairing.code),
-              ...pairingUrls.map((url) => h('a', {
-                key: url,
-                href: url,
-                target: '_blank',
-                rel: 'noreferrer',
-                style: { ...S.meta, color: 'inherit' },
-              }, url)),
-            ),
-            pairScan
-              ? h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' } },
-                h('img', {
-                  alt: 'Pairing QR code',
-                  src: '/remote-control/api/qr?text=' + encodeURIComponent(pairScan),
-                  style: { width: '132px', height: '132px', background: '#fff', borderRadius: '8px', padding: '6px' },
-                }),
-                h('span', { style: S.meta }, 'Scan to pair'),
-                h('a', {
-                  href: pairScan,
-                  target: '_blank',
-                  rel: 'noreferrer',
-                  style: { ...S.meta, color: 'inherit', maxWidth: '220px', overflowWrap: 'anywhere', textAlign: 'center' },
-                }, pairScan),
-              )
-              : null,
-          ),
-            )
-          : null,
-        notify
-          ? h(Collapsible, { title: 'Notifications', summary: 'approval / question delivery', storageKey: 'notifications', defaultOpen: false },
-              h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
-            h('div', { style: { display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' } },
-              h('span', { style: { fontWeight: 600 } }, 'Notifications'),
-              h('span', { style: S.meta }, 'approval / question reach you out of band — credentials stay in this Host'),
-            ),
-            h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' } },
-              h('label', { style: { ...S.meta, display: 'flex', flexDirection: 'column', gap: '3px' } },
-                'Channel',
-                h('select', {
-                  style: S.field,
-                  value: notify.kind,
-                  onChange: (event) => patchNotify('kind', event.target.value),
-                }, ['none', 'smtp', 'mailgun', 'webhook', 'ntfy'].map((kind) => h('option', { key: kind, value: kind }, kind))),
+        view === 'settings'
+          ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px', overflowY: 'auto', minHeight: 0 } },
+            state?.service
+              ? h(Collapsible, { title: 'Service', summary: 'tunnel / LAN reachability', storageKey: 'service', defaultOpen: true },
+                  h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
+                h('span', { style: { fontWeight: 600 } }, 'Service'),
+                h('span', { style: { ...S.chip, ...(state.service.healthy ? S.chipOk : S.chipWarn) } }, state.service.healthy ? 'healthy' : 'unhealthy'),
+                h('span', { style: S.meta }, state.service.provider + (state.service.since ? ' · up ' + uptimeText(state.service.since) : '')),
+                state.service.endpoint
+                  ? h('span', { style: { ...S.meta, maxWidth: '320px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: state.service.endpoint }, state.service.endpoint)
+                  : null,
+                state.service.lastError
+                  ? h('span', { style: { ...S.chip, ...S.chipBad }, title: state.service.lastError.message }, state.service.lastError.code)
+                  : null,
+                h('div', { style: { flex: 1 } }),
+                state.service.provision && !state.service.provision.installed
+                  ? h('button', { type: 'button', style: S.button, disabled: busy === 'service', onClick: installTunnel }, 'Download & verify v' + state.service.provision.version)
+                  : null,
+                h('button', { type: 'button', style: S.button, disabled: busy === 'service', onClick: () => serviceAction('start') }, 'Start'),
+                h('button', { type: 'button', style: S.button, disabled: busy === 'service', onClick: () => serviceAction('stop') }, 'Stop'),
+                state.service.endpoint
+                  ? h('img', {
+                    alt: 'Service URL QR',
+                    src: '/remote-control/api/qr?text=' + encodeURIComponent(state.service.endpoint),
+                    style: { width: '84px', height: '84px', background: '#fff', borderRadius: '8px', padding: '4px' },
+                  })
+                  : null,
               ),
-              ...notifyFields(),
-            ),
-            h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
-              h('button', { type: 'button', style: S.button, disabled: notifyBusy, onClick: saveNotify }, 'Save'),
-              h('button', { type: 'button', style: S.button, disabled: notifyBusy || notify.kind === 'none', onClick: testNotify }, 'Send test'),
-              notifyStatus
-                ? h('span', { style: { ...S.meta, color: notifyStatus.bad ? '#ff8c8c' : '#7ee08b' } }, notifyStatus.text)
-                : null,
-            ),
-          ),
-            )
+                )
+              : null,
+            state?.pairing?.code
+              ? h(Collapsible, { title: 'Pairing', summary: 'code and QR for a new phone', storageKey: 'pairing', defaultOpen: false },
+                  h('div', { style: { display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' } },
+                h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '240px' } },
+                  h('span', { style: S.meta }, 'Pairing code — enter it on the phone, or scan the code to pair automatically'),
+                  h('span', {
+                    style: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '30px', letterSpacing: '8px', fontWeight: 600 },
+                    onDblClick: () => { try { navigator.clipboard?.writeText(state.pairing.code) } catch { /* ignore */ } },
+                  }, state.pairing.code),
+                  ...pairingUrls.map((url) => h('a', {
+                    key: url,
+                    href: url,
+                    target: '_blank',
+                    rel: 'noreferrer',
+                    style: { ...S.meta, color: 'inherit' },
+                  }, url)),
+                ),
+                pairScan
+                  ? h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' } },
+                    h('img', {
+                      alt: 'Pairing QR code',
+                      src: '/remote-control/api/qr?text=' + encodeURIComponent(pairScan),
+                      style: { width: '132px', height: '132px', background: '#fff', borderRadius: '8px', padding: '6px' },
+                    }),
+                    h('span', { style: S.meta }, 'Scan to pair'),
+                    h('a', {
+                      href: pairScan,
+                      target: '_blank',
+                      rel: 'noreferrer',
+                      style: { ...S.meta, color: 'inherit', maxWidth: '220px', overflowWrap: 'anywhere', textAlign: 'center' },
+                    }, pairScan),
+                  )
+                  : null,
+              ),
+                )
+              : null,
+            notify
+              ? h(Collapsible, { title: 'Notifications', summary: 'approval / question delivery', storageKey: 'notifications', defaultOpen: false },
+                  h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+                h('div', { style: { display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' } },
+                  h('span', { style: { fontWeight: 600 } }, 'Notifications'),
+                  h('span', { style: S.meta }, 'approval / question reach you out of band — credentials stay in this Host'),
+                ),
+                h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' } },
+                  h('label', { style: { ...S.meta, display: 'flex', flexDirection: 'column', gap: '3px' } },
+                    'Channel',
+                    h('select', {
+                      style: S.field,
+                      value: notify.kind,
+                      onChange: (event) => patchNotify('kind', event.target.value),
+                    }, ['none', 'smtp', 'mailgun', 'webhook', 'ntfy'].map((kind) => h('option', { key: kind, value: kind }, kind))),
+                  ),
+                  ...notifyFields(),
+                ),
+                h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
+                  h('button', { type: 'button', style: S.button, disabled: notifyBusy, onClick: saveNotify }, 'Save'),
+                  h('button', { type: 'button', style: S.button, disabled: notifyBusy || notify.kind === 'none', onClick: testNotify }, 'Send test'),
+                  notifyStatus
+                    ? h('span', { style: { ...S.meta, color: notifyStatus.bad ? '#ff8c8c' : '#7ee08b' } }, notifyStatus.text)
+                    : null,
+                ),
+              ),
+                )
+              : null,
+          )
           : null,
         error ? h('div', { style: S.error }, error) : null,
 
@@ -1174,7 +1199,8 @@ window.__ModuleLoader__.load({
           )))
           : null,
 
-        h('div', { style: S.body },
+        view === 'chat'
+          ? h('div', { style: S.body },
           h(Collapsible, {
               title: 'Devices',
               summary: openPeer ? openPeer.deviceName : peers.length + ' found',
@@ -1296,7 +1322,8 @@ window.__ModuleLoader__.load({
                   ),
             )
             : h('div', { style: S.empty }, 'Select a trusted device to see its sessions.'),
-        ),
+        )
+          : h('div', { style: { ...S.meta, padding: '18px' } }, 'Setup lives in the Settings tab. Switch back to Chat to control a device.'),
       )
     }
 
