@@ -510,6 +510,7 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
       address: rinfo.address,
       port: Number(message.port) || 57330,
       proto: message.proto === 'https' ? 'https' : 'http',
+      origin: message.origin === 'tailnet' ? 'tailnet' : 'lan',
       lastSeen: Date.now(),
       approved: approvals.has(message.deviceId) || Boolean(existing?.approved),
       secret: approvals.get(message.deviceId)?.secret ?? existing?.secret,
@@ -1411,9 +1412,9 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
     rehandshake: rehandshakePeer,
     attemptPunch: punchPeer,
     // Diagnostics used by the latency tests and by the Devices panel tooling.
-    simulateAnnounce(deviceId, address, port, proto = 'http') {
+    simulateAnnounce(deviceId, address, port, proto = 'http', deviceName = '') {
       onAnnounce(
-        { kind: ANNOUNCE_KIND, deviceId, deviceName: `simulated-${deviceId}`, userId: null, port, proto },
+        { kind: ANNOUNCE_KIND, deviceId, deviceName: deviceName || `simulated-${deviceId}`, userId: null, port, proto, origin: 'tailnet' },
         { address },
       )
     },
@@ -1490,7 +1491,7 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
           lane: peer.lastTransport === 'relay'
             ? 'relay'
             : selectLane({ sameLan: peer.proto !== 'relay', punched: Boolean(approvals.get(peer.deviceId)?.punch), relayAvailable: Boolean(relay) }),
-          transport: peer.lastTransport ?? (peer.proto === 'relay' ? 'relay' : 'lan'),
+          transport: peer.lastTransport ?? (peer.proto === 'relay' ? 'relay' : (peer.origin === 'tailnet' ? 'tailnet' : 'lan')),
           timing: peer.lastTiming ?? null,
           blocked: { lan: laneBlocked(peer.deviceId, 'lan'), p2p: laneBlocked(peer.deviceId, 'p2p') },
           needsReapproval: Boolean(approvals.get(peer.deviceId)?.publicKey && !approvals.get(peer.deviceId)?.agreementKey),
