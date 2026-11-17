@@ -47,6 +47,7 @@ const SCOPE_BY_PATH = [
   [/^\/peer\/session\/config$/, (method) => (method === 'GET' ? 'config:read' : 'config:write')],
   [/^\/peer\/hitl$/, () => 'transcript:read'],
   [/^\/peer\/hitl\/answer$/, () => 'prompt:send'],
+  [/^\/peer\/attachment$/, () => 'transcript:read'],
   [/^\/peer\/upload\//, () => 'files:write'],
 ]
 
@@ -64,7 +65,7 @@ function scopeFor(method, pathname) {
  * Everything here is plain Node so it can be exercised without Cordis:
  * `sessions` is a small facade over the Host's session controller.
  */
-export function createFabric({ log, config, self, sessions, stateFile, store, uploads, identity, hitl, limits = {} }) {
+export function createFabric({ log, config, self, sessions, stateFile, store, uploads, identity, hitl, readAttachment, limits = {} }) {
   const approvalStore = store ?? createFileStore(stateFile, log)
   const rate = new Map() // deviceId -> { count, resetAt }
   const rateLimit = {
@@ -975,6 +976,21 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
       const accepted = bridge.answer(requestId, body)
       // A stale card (already answered elsewhere) is a conflict, not a failure.
       return accepted ? reply(200, { ok: true }) : reply(409, { error: 'stale-request' })
+    }
+    if (pathname === '/peer/attachment' && req.method === 'GET') {
+      // Base64 in JSON: the peer channel is JSON end to end, and an 8 MB cap
+      // keeps a phone page from waiting on a huge image.
+      if (typeof readAttachment !== 'function') return reply(503, { error: 'attachments-unavailable' })
+      const raw = String(url.searchParams.get('ref') || '')
+      if (!raw) return reply(400, { error: 'missing-ref' })
+      let ref
+      try { ref = JSON.parse(raw) } catch { return reply(400, { error: 'bad-ref' }) }
+      if (!ref || typeof ref !== 'object' || typeof ref.attachmentId !== 'string') return reply(400, { error: 'bad-ref' })
+      const stored = await readAttachment(ref)
+      if (!stored || !stored.bytes) return reply(404, { error: 'not-found' })
+      const bytes = Buffer.from(stored.bytes)
+      if (bytes.length > 8 * 1024 * 1024) return reply(413, { error: 'attachment-too-large' })
+      return reply(200, { mediaType: stored.mediaType || ref.mediaType || 'application/octet-stream', data: bytes.toString('base64') })
     }
     if (pathname === '/peer/cancel' && req.method === 'POST') {
       const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : ''

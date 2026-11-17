@@ -262,6 +262,25 @@ export function apply(ctx, rawConfig) {
     getAttachments: () => (typeof ctx.get === 'function' ? safely(() => ctx.get('attachments')) : undefined),
   })
 
+  /** Read a transcript attachment so a paired peer can render it. */
+  async function readAttachmentForPeer(ref) {
+    const attachments = typeof ctx.get === 'function' ? safely(() => ctx.get('attachments')) : undefined
+    if (!attachments) return null
+    const isImage = typeof ref?.mediaType === 'string' && ref.mediaType.startsWith('image/')
+    if (isImage) {
+      const stored = await attachments.readImage(ref)
+      return { mediaType: stored.mediaType || ref.mediaType, bytes: Buffer.from(stored.data) }
+    }
+    const chunks = []
+    let total = 0
+    for await (const chunk of attachments.readFileStream(ref)) {
+      total += chunk.length
+      if (total > 8 * 1024 * 1024) return null
+      chunks.push(Buffer.from(chunk))
+    }
+    return { mediaType: ref.mediaType || 'application/octet-stream', bytes: Buffer.concat(chunks) }
+  }
+
   const hitl = createHitl({ broadcast: broadcastHitl, log, takeover: config.hitl?.takeover })
   let hitlListening = false
 
@@ -318,6 +337,7 @@ export function apply(ctx, rawConfig) {
     uploads,
     identity: () => deviceIdentity,
     hitl: () => hitl,
+    readAttachment: readAttachmentForPeer,
     limits: { rateMax: config.rateMax, rateWindowMs: config.rateWindowMs },
     self: () => ({
       deviceId: state?.deviceId ?? '',
@@ -863,6 +883,13 @@ export function apply(ctx, rawConfig) {
         }
         const body = await readJson(req)
         const reply = await fabric.callPeer(deviceId, 'POST', '/peer/hitl/answer', body)
+        return json(res, reply.status ?? (reply.ok ? 200 : 502), reply.json ?? { error: reply.error })
+      }
+      const attachMatch = action.match(/^\/peer\/([^/]+)\/attachment$/)
+      if (attachMatch && req.method === 'GET') {
+        const deviceId = decodeURIComponent(attachMatch[1])
+        const ref = String(url.searchParams.get('ref') || '')
+        const reply = await fabric.callPeer(deviceId, 'GET', '/peer/attachment?ref=' + encodeURIComponent(ref), undefined, { race: true })
         return json(res, reply.status ?? (reply.ok ? 200 : 502), reply.json ?? { error: reply.error })
       }
     if (match) {

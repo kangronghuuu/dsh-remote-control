@@ -70,6 +70,8 @@ window.__ModuleLoader__.load({
         background: 'transparent', color: 'inherit', border: '1px solid var(--dsw-alias-border-l1)',
       },
       hitlStack: { display: 'flex', flexDirection: 'column', gap: '8px', padding: '8px 0' },
+      imageRow: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px' },
+      messageImage: { maxWidth: '180px', maxHeight: '180px', borderRadius: '8px', border: '1px solid var(--dsw-alias-border-l1)', cursor: 'zoom-in' },
       hitlCard: {
         display: 'flex', flexDirection: 'column', gap: '6px', padding: '9px 11px', borderRadius: '10px',
         border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)',
@@ -393,6 +395,37 @@ window.__ModuleLoader__.load({
      * One pending approval or question raised on the peer that owns the session.
      * Answered over the peer channel, then the poll clears it.
      */
+    function blocksImages(content) {
+      if (!Array.isArray(content)) return []
+      return content
+        .filter((block) => block && block.type === 'image' && block.attachment && typeof block.attachment === 'object')
+        .map((block) => block.attachment)
+    }
+
+    /**
+     * An image lives on the Host that owns the session, so it arrives as base64
+     * over the peer channel and is shown from a data URL.
+     */
+    function AttachmentImage({ peerId, ref }) {
+      const [src, setSrc] = useState('')
+      useEffect(() => {
+        let alive = true
+        const url = '/remote-control/api/peer/' + encodeURIComponent(peerId) + '/attachment?ref=' + encodeURIComponent(JSON.stringify(ref))
+        api(url).then((value) => {
+          if (!alive || !value?.data) return
+          setSrc('data:' + (value.mediaType || 'image/png') + ';base64,' + value.data)
+        }).catch(() => {})
+        return () => { alive = false }
+      }, [peerId, ref])
+      if (!src) return h('span', { style: S.meta }, ref?.name || 'image')
+      return h('img', {
+        src,
+        alt: ref?.name || 'image',
+        style: S.messageImage,
+        onClick: () => window.open(src, '_blank'),
+      })
+    }
+
     function HitlCard({ item, onAnswer }) {
       const question = Array.isArray(item.questions) ? item.questions[0] : null
       const options = Array.isArray(question?.options) ? question.options : []
@@ -871,7 +904,14 @@ window.__ModuleLoader__.load({
     }
 
     function renderEntry(entry) {
-      if (entry.kind === 'user') return h('div', { key: entry.key, style: { ...S.bubble, ...S.userBubble } }, entry.text)
+      if (entry.kind === 'user') {
+        return h('div', { key: entry.key, style: { ...S.bubble, ...S.userBubble } },
+          entry.text ? h('div', { style: { whiteSpace: 'pre-wrap' } }, entry.text) : null,
+          entry.images?.length
+            ? h('div', { style: S.imageRow }, entry.images.map((ref, position) => h(AttachmentImage, { key: (ref.attachmentId || '') + position, peerId, ref })))
+            : null,
+        )
+      }
       if (entry.kind === 'assistant') {
         return h('div', { key: entry.key, style: { ...S.bubble, ...S.assistantBubble } },
           h('div', { className: 'rc-md', dangerouslySetInnerHTML: { __html: markdownHtml(entry.text) } }),
@@ -928,12 +968,18 @@ window.__ModuleLoader__.load({
         case 'user/message': {
           const kind = data.source?.kind
           if (kind && kind !== 'user') return null
-          const text = blocksText(data.content ?? data.message?.content)
-          return text ? { key, kind: 'user', text } : null
+          const content = data.content ?? data.message?.content
+          const text = blocksText(content)
+          const images = blocksImages(content)
+          if (!text && images.length === 0) return null
+          return { key, kind: 'user', text, images }
         }
         case 'assistant/message': {
-          const text = blocksText(data.message?.content)
-          return text ? { key, kind: 'assistant', text } : null
+          const content = data.message?.content
+          const text = blocksText(content)
+          const images = blocksImages(content)
+          if (!text && images.length === 0) return null
+          return { key, kind: 'assistant', text, images }
         }
         case 'tool/call': {
           const name = String(data.name || 'tool')
