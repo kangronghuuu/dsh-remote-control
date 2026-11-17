@@ -1884,10 +1884,13 @@ async function refreshQueue() {
   try {
     const value = await request(`/api/state?sessionId=${encodeURIComponent(state.sessionId)}`)
     if (typeof value?.running === 'boolean') {
+      const wasKnown = state.runningKnown === true
       state.runningKnown = true
       const changed = state.running !== value.running
-      state.running = value.running
-      if (changed) recomputeTurnAlert()
+      if (changed) setRunning(value.running)
+      // Re-evaluate also on the first answer: before it the interrupted alert is
+      // deliberately suppressed, so the banner needs this trigger.
+      if (changed || !wasKnown) recomputeTurnAlert()
     }
     if (value && state.sessionId) renderQueue(Array.isArray(value.queue) ? value.queue : [])
   } catch { /* queue state is best-effort */ }
@@ -1906,14 +1909,13 @@ async function queueAction(itemId, kind) {
 /* ---------------- scroll jumps ---------------- */
 
 function updateScrollJump() {
-  if (!el.scrollJump) return
+  if (!el.scrollTopBtn || !el.scrollBottomBtn) return
   const log = el.log
-  const fromBottom = log.scrollHeight - log.scrollTop - log.clientHeight
-  const showUp = log.scrollTop > 200
-  const showDown = fromBottom > 80
-  el.scrollJump.hidden = !(showUp || showDown)
-  if (el.scrollTopBtn) el.scrollTopBtn.hidden = !showUp
-  if (el.scrollBottomBtn) el.scrollBottomBtn.hidden = !showDown
+  const atTop = log.scrollTop <= 40
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60
+  el.scrollTopBtn.hidden = atTop
+  el.scrollBottomBtn.hidden = atBottom
+  if (el.scrollJump) el.scrollJump.hidden = atTop && atBottom
 }
 
 /* ---------------- history paging ---------------- */
