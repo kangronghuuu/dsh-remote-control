@@ -33,6 +33,7 @@ const el = {
   logout: $('logout'),
   title: $('session-title'),
   meta: $('session-meta'),
+  turnNav: $('turn-nav'),
   status: $('status'),
   log: $('log'),
   empty: $('empty'),
@@ -103,6 +104,11 @@ const state = {
   // Last compact "process" row, so consecutive identical fallback events fold
   // into a counter instead of flooding the transcript.
   lastProcess: null,
+  // The compaction card currently being filled in.
+  compaction: null,
+  // Turn boundaries, for the turn navigator: [{ turn, node }]
+  turns: [],
+  pendingTurn: null,
 }
 
 let renderingHistory = false
@@ -247,6 +253,7 @@ function startApp() {
   el.log.addEventListener('scroll', () => {
     state.pinned = el.log.scrollHeight - el.log.scrollTop - el.log.clientHeight < 60
     updateScrollJump()
+    updateTurnNav()
     const now = Date.now()
     if (now - scrollSavedAt > 300) {
       scrollSavedAt = now
@@ -390,6 +397,9 @@ function selectSession(id) {
   state.pending = []
   state.config = null
   state.queueItems = []
+  state.turns = []
+  state.pendingTurn = null
+  if (el.turnNav) { el.turnNav.hidden = true; el.turnNav.textContent = '' }
   if (el.queue) { el.queue.textContent = ''; el.queue.hidden = true }
   renderAttachments()
   closeConfig()
@@ -911,10 +921,12 @@ function appendEvent(event) {
     case 'tool/result':
       addToolResult(data)
       break
-    case 'turn/start':
+    case 'turn/start': {
       setRunning(true)
+      state.pendingTurn = typeof data.turn === 'number' ? data.turn : (state.turns.length + 1)
       refreshQueue()
       break
+    }
     case 'turn/end': {
       setRunning(false)
       refreshQueue()
@@ -926,6 +938,20 @@ function appendEvent(event) {
       } else if (reason.kind === 'max-tokens') {
         addNote('Stopped at the token limit')
       }
+      break
+    }
+    case 'compaction/start':
+    case 'compact/start': {
+      startCompaction(data)
+      break
+    }
+    case 'compaction/summary':
+    case 'compaction/end':
+    case 'compaction/prune':
+    case 'compact/summary':
+    case 'compact/end':
+    case 'compact/prune': {
+      updateCompaction(event.type, data)
       break
     }
     default:
@@ -1342,6 +1368,109 @@ function appendDiff(container, before, after) {
   container.append(block)
 }
 
+/* ---------------- turn navigation ---------------- */
+
+function turnContentTop(node) {
+  const logRect = el.log.getBoundingClientRect()
+  return node.getBoundingClientRect().top - logRect.top + el.log.scrollTop
+}
+
+function currentTurnIndex() {
+  const log = el.log
+  // Pinned to the bottom means "the newest turn", even when its first node
+  // starts below the probe line.
+  if (log.scrollHeight - log.scrollTop - log.clientHeight < 60) return state.turns.length - 1
+  const probe = log.scrollTop + 120
+  let index = 0
+  for (let i = 0; i < state.turns.length; i += 1) {
+    if (turnContentTop(state.turns[i].node) <= probe) index = i
+  }
+  return index
+}
+
+function jumpTurn(index) {
+  const target = state.turns[index]
+  if (!target) return
+  scrollLogTo(Math.max(0, turnContentTop(target.node) - 12))
+  state.pinned = false
+  updateTurnNav()
+}
+
+function updateTurnNav() {
+  if (!el.turnNav) return
+  if (state.turns.length < 2) {
+    el.turnNav.hidden = true
+    return
+  }
+  const index = currentTurnIndex()
+  el.turnNav.hidden = false
+  el.turnNav.textContent = ''
+  const prev = document.createElement('button')
+  prev.type = 'button'
+  prev.className = 'turn-step'
+  prev.textContent = '‹'
+  prev.disabled = index <= 0
+  prev.addEventListener('click', () => jumpTurn(index - 1))
+  const label = document.createElement('span')
+  label.textContent = `Turn ${index + 1}/${state.turns.length}`
+  const next = document.createElement('button')
+  next.type = 'button'
+  next.className = 'turn-step'
+  next.textContent = '›'
+  next.disabled = index >= state.turns.length - 1
+  next.addEventListener('click', () => jumpTurn(index + 1))
+  el.turnNav.append(prev, label, next)
+}
+
+/* ---------------- context compaction ---------------- */
+
+function compactionText(data) {
+  const value = data?.summary ?? data?.text ?? data?.content ?? data?.message?.content
+  const text = typeof value === 'string' ? value : blocksText(value)
+  return String(text || '').trim()
+}
+
+/** The Host folded older messages into a summary: show it instead of dropping it. */
+function startCompaction(data) {
+  const card = document.createElement('details')
+  card.className = 'compaction'
+  const summary = document.createElement('summary')
+  summary.className = 'compaction-head'
+  summary.textContent = 'Compacting context…'
+  const body = document.createElement('pre')
+  body.className = 'compaction-body'
+  card.append(summary, body)
+  push(card)
+  state.compaction = { card, summary, body, done: false }
+  const text = compactionText(data)
+  if (text) applyCompactionSummary(text)
+}
+
+function applyCompactionSummary(text) {
+  const current = state.compaction
+  if (!current) return
+  current.body.textContent = text
+  current.summary.textContent = `Context compacted · ${text.length} chars of summary`
+  current.done = true
+}
+
+function updateCompaction(type, data) {
+  const text = compactionText(data)
+  if (type.endsWith('/summary') && text) {
+    if (!state.compaction) startCompaction({})
+    applyCompactionSummary(text)
+    return
+  }
+  const current = state.compaction
+  if (!current) return
+  if (type.endsWith('/prune')) {
+    const removed = Array.isArray(data?.removed) ? data.removed.length : Number(data?.removed ?? data?.count ?? 0)
+    current.summary.textContent = `Context compacted · ${removed || '?'} message(s) pruned`
+    return
+  }
+  if (!current.done) current.summary.textContent = 'Context compacted'
+}
+
 /* ---------------- human in the loop ---------------- */
 
 function renderHitl(item) {
@@ -1530,6 +1659,12 @@ function push(node) {
   // Any real message breaks a run of collapsed process lines.
   if (node.className !== 'process-row') state.lastProcess = null
   el.log.append(node)
+  if (state.pendingTurn !== null) {
+    node.dataset.turn = String(state.pendingTurn)
+    state.turns.push({ turn: state.pendingTurn, node })
+    state.pendingTurn = null
+    updateTurnNav()
+  }
   if (state.pinned && !renderingHistory) {
     requestAnimationFrame(() => {
       scrollLogTo(el.log.scrollHeight)
