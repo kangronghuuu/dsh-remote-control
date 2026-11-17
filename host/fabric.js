@@ -338,7 +338,16 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
       if (!minted) return { ok: false, error: 'no-identity' }
       // The request still travels over the current channel; the new key is
       // installed only once the peer's signed reply verifies.
-      const result = await peerCall(peer, 'POST', '/peer/rehandshake', { ephemeral: minted.message })
+      // Deliberately unsealed. When one side restarted, the lane key is stale
+      // and sealing the handshake with it fails with bad-envelope, which used
+      // to force a full re-pair. Signature auth is enough to bootstrap a fresh
+      // lane; the new key is installed only after the signed reply verifies.
+      const headers = authHeaders(peer.deviceId, 'POST', '/peer/rehandshake')
+      const result = await callDirect(
+        peer, 'POST', '/peer/rehandshake', { ephemeral: minted.message },
+        approvals.get(peerDeviceId)?.secret ?? '', self().deviceId, headers, undefined,
+        config.directTimeoutMs ?? 3000, false,
+      )
       if (!result.ok) return { ok: false, error: result.json?.error || result.error || 'rehandshake-failed' }
       const theirs = result.json?.ephemeral
       const approval = approvals.get(peerDeviceId)
@@ -909,7 +918,8 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
         if (key.endsWith(`:${verdict.deviceId}`)) lanCiphers.delete(key)
       }
       await saveApprovals()
-      return reply(200, { ok: true, ephemeral: replyMessage })
+      // Plaintext reply: the caller could not open a sealed one if its lane was stale.
+      return json(res, 200, { ok: true, ephemeral: replyMessage })
     }
     if (pathname === '/peer/session/config' && req.method === 'GET') {
       const sessionId = String(url.searchParams.get('sessionId') || '')
@@ -1570,8 +1580,16 @@ function sign(secret, deviceId, method, pathname, timestamp, body) {
  * seen last is not always the reachable one (LAN vs tailnet), so a failed
  * attempt rotates the candidate instead of failing the whole call.
  */
-async function callDirect(peer, method, pathname, body, secret, callerId, extraHeaders, lane, timeoutMs) {
+async function callDirect(peer, method, pathname, body, secret, callerId, extraHeaders, lane, timeoutMs, allowHeal = true) {
   const first = await callRaw(peer, method, pathname, body, secret, callerId, extraHeaders, lane, timeoutMs)
+  // A lane can go stale when the peer restarted and forgot its ephemeral key.
+  // Rotate it over the unsealed handshake and retry once before giving up.
+  if (allowHeal && (first?.error === 'bad-envelope' || first?.json?.error === 'bad-envelope')) {
+    const healed = await rehandshakePeer(peer.deviceId).catch(() => undefined)
+    if (healed?.ok) {
+      return await callRaw(peer, method, pathname, body, secret, callerId, extraHeaders, lane, timeoutMs)
+    }
+  }
   if (!first?.error || !Array.isArray(peer.candidates) || peer.candidates.length < 2) return first
   for (const candidate of peer.candidates) {
     if (!candidate || typeof candidate.address !== 'string') continue
