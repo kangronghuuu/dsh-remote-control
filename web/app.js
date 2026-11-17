@@ -547,37 +547,9 @@ function handleFrame(frame) {
     } finally {
       state.replaying = false
     }
-        const alertFromHistory = (() => {
-      let lastStart = null
-      let lastEnd = null
-      for (const record of frame.records || []) {
-        const event = record?.event
-        if (!event) continue
-        if (event.type === 'turn/start') lastStart = event
-        if (event.type === 'turn/end') lastEnd = event
-      }
-      const running = state.running === true
-      if (lastStart && (!lastEnd || (lastStart.seq ?? 0) > (lastEnd.seq ?? 0))) {
-        // A turn that is still open is not an interruption.
-        if (running) return null
-        return {
-          kind: 'interrupted',
-          seq: lastStart.seq,
-          text: 'The last turn was interrupted (no completion was recorded).',
-        }
-      }
-      const fromEnd = lastEnd ? turnAlertFromReason(lastEnd.data?.reason || {}, lastEnd.at || lastEnd.data?.at) : null
-      return fromEnd ? { ...fromEnd, seq: lastEnd.seq } : null
-    })()
-    const alert = alertFromHistory
-    if (alert && !isAlertDismissed(alert)) {
-      state.turnAlert = alert
-    } else {
-      // Already dismissed (or nothing to say): the replay may have raised it while
-      // the records were appended, so clear it explicitly.
-      state.turnAlert = null
-    }
-    renderTurnBanner()
+    refreshQueue()
+        state.snapshotRecords = frame.records || []
+    recomputeTurnAlert()
     updateHistoryButton()
     return
   }
@@ -1084,7 +1056,8 @@ function appendEvent(event) {
       addToolResult(data)
       break
     case 'turn/start': {
-      setRunning(true)
+      // History is not the current state: the Host's running flag decides.
+      if (!state.replaying) setRunning(true)
       // Only a genuinely new turn invalidates earlier dismissals.
       if (!state.replaying) {
         try { window.localStorage.removeItem(DISMISSED_ALERTS_KEY) } catch { /* ignore */ }
@@ -1098,7 +1071,7 @@ function appendEvent(event) {
       break
     }
     case 'turn/end': {
-      setRunning(false)
+      if (!state.replaying) setRunning(false)
       refreshQueue()
       const reason = data.reason || {}
       // Carry the seq so the dismissal key matches the one derived from history.\n      const fromReason = turnAlertFromReason(reason, Date.now())\n      state.turnAlert = fromReason ? { ...fromReason, seq: frame.event?.seq ?? null } : null
@@ -1910,6 +1883,12 @@ async function refreshQueue() {
   if (!state.sessionId) return
   try {
     const value = await request(`/api/state?sessionId=${encodeURIComponent(state.sessionId)}`)
+    if (typeof value?.running === 'boolean') {
+      state.runningKnown = true
+      const changed = state.running !== value.running
+      state.running = value.running
+      if (changed) recomputeTurnAlert()
+    }
     if (value && state.sessionId) renderQueue(Array.isArray(value.queue) ? value.queue : [])
   } catch { /* queue state is best-effort */ }
 }
@@ -2089,6 +2068,37 @@ function dismissAlert(info) {
       window.localStorage.setItem(DISMISSED_ALERTS_KEY, JSON.stringify(map))
     }
   } catch { /* storage unavailable */ }
+  renderTurnBanner()
+}
+
+/** Derive the alert from the last replay plus the Host's running flag. */
+function recomputeTurnAlert() {
+  const records = state.snapshotRecords || []
+  let lastStart = null
+  let lastEnd = null
+  for (const record of records) {
+    const event = record?.event
+    if (!event) continue
+    if (event.type === 'turn/start') lastStart = event
+    if (event.type === 'turn/end') lastEnd = event
+  }
+  const running = state.running === true
+  let alert = null
+  if (lastStart && (!lastEnd || (lastStart.seq ?? 0) > (lastEnd.seq ?? 0))) {
+    // An open turn is only an interruption when the Host says nothing is running,
+    // and only once the Host has told us anything at all.
+    if (!running && state.runningKnown) {
+      alert = {
+        kind: 'interrupted',
+        seq: lastStart.seq,
+        text: 'The last turn was interrupted (no completion was recorded).',
+      }
+    }
+  } else if (lastEnd) {
+    const fromEnd = turnAlertFromReason(lastEnd.data?.reason || {}, lastEnd.at || lastEnd.data?.at)
+    alert = fromEnd ? { ...fromEnd, seq: lastEnd.seq } : null
+  }
+  state.turnAlert = alert && !isAlertDismissed(alert) ? alert : null
   renderTurnBanner()
 }
 
