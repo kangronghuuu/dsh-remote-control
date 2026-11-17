@@ -33,6 +33,12 @@ window.__ModuleLoader__.load({
         whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', minWidth: 0,
       },
       // A chat title shrinks with the panel instead of widening it.
+      turnBanner: {
+        display: 'flex', alignItems: 'center', gap: '8px', margin: '8px 14px 0', padding: '8px 10px',
+        borderRadius: '10px', fontSize: '12px', border: '1px solid var(--dsw-alias-state-warn-primary)',
+        background: 'rgba(217, 164, 65, .12)',
+      },
+      turnBannerError: { borderColor: 'var(--dsw-alias-state-error-primary)', background: 'rgba(217, 83, 79, .12)' },
       runChip: {
         display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11px',
         color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap', flex: '0 0 auto',
@@ -786,6 +792,29 @@ window.__ModuleLoader__.load({
         node?.scrollIntoView({ block: 'start', behavior: 'smooth' })
       }
 
+      // A turn that stopped early (or never finished because the Host restarted)
+      // has to be visible; a line in the transcript is easy to miss.
+      const [turnAlert, setTurnAlert] = useState(null)
+      useEffect(() => {
+        let lastStart = null
+        let lastEnd = null
+        for (const entry of entries) {
+          if (entry.kind === 'turn-start') lastStart = entry
+          else if (entry.kind === 'turn-end') lastEnd = entry
+        }
+        const seqOf = (entry) => Number(String(entry?.key || '').replace(/^e/, '')) || 0
+        if (lastStart && (!lastEnd || seqOf(lastStart) > seqOf(lastEnd))) {
+          setTurnAlert({ kind: 'interrupted', text: 'The last turn was interrupted (no completion was recorded).' })
+          return
+        }
+        const reason = lastEnd?.reason || {}
+        const when = lastEnd?.at ? ' · ' + new Date(lastEnd.at).toLocaleTimeString() : ''
+        if (reason.kind === 'aborted') setTurnAlert({ kind: 'aborted', text: 'Turn interrupted — it was stopped before finishing.' + when })
+        else if (reason.kind === 'max-tokens') setTurnAlert({ kind: 'max-tokens', text: 'Turn stopped at the token limit; the answer is incomplete.' + when })
+        else if (reason.kind === 'error') setTurnAlert({ kind: 'error', text: 'Turn failed: ' + (reason.error?.message || reason.error?.code || 'unknown error') + when })
+        else setTurnAlert(null)
+      }, [entries])
+
       const [hitl, setHitl] = useState([])
       const refreshHitl = useCallback(async () => {
         if (!peerId || !sessionId) return
@@ -996,6 +1025,13 @@ window.__ModuleLoader__.load({
             borderBottom: '1px solid var(--dsw-alias-border-l1)', minWidth: 0,
           },
         },
+        turnAlert
+          ? h('div', { style: { ...S.turnBanner, ...(turnAlert.kind === 'error' ? S.turnBannerError : {}) } },
+            h('span', { style: { flex: 1, minWidth: 0 } }, turnAlert.text),
+            h('button', { type: 'button', style: S.smallButton, onClick: () => setTurnAlert(null) }, 'Dismiss'),
+          )
+          : null,
+
           h('span', { style: S.chatTitle, title: title || sessionId }, title || sessionId),
           h('span', {
             style: { ...S.runChip, ...(running ? S.runChipOn : {}) },
@@ -1310,7 +1346,7 @@ window.__ModuleLoader__.load({
         case 'turn/start':
           return { key, kind: 'turn-start' }
         case 'turn/end':
-          return { key, kind: 'turn-end' }
+          return { key, kind: 'turn-end', reason: data.reason || {}, at: data.at || data.endedAt || null }
         case 'session/title':
           return null
         case 'compaction/summary':

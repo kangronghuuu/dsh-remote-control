@@ -515,6 +515,21 @@ function handleFrame(frame) {
     for (const record of frame.records || []) {
       if (record?.type === 'event' && record.event) appendEvent(record.event)
     }
+        const alertFromHistory = (() => {
+      let lastStart = null
+      let lastEnd = null
+      for (const record of frame.records || []) {
+        const event = record?.event
+        if (!event) continue
+        if (event.type === 'turn/start') lastStart = event
+        if (event.type === 'turn/end') lastEnd = event
+      }
+      if (lastStart && (!lastEnd || (lastStart.seq ?? 0) > (lastEnd.seq ?? 0))) {
+        return { kind: 'interrupted', text: 'The last turn was interrupted (no completion was recorded).' }
+      }
+      return lastEnd ? turnAlertFromReason(lastEnd.data?.reason || {}, lastEnd.at || lastEnd.data?.at) : null
+    })()
+    if (alertFromHistory) { state.turnAlert = alertFromHistory; renderTurnBanner() }
     updateHistoryButton()
     return
   }
@@ -1022,6 +1037,8 @@ function appendEvent(event) {
       break
     case 'turn/start': {
       setRunning(true)
+      state.turnAlert = null
+      renderTurnBanner()
       state.pendingTurn = typeof data.turn === 'number' ? data.turn : (state.turns.length + 1)
       refreshQueue()
       break
@@ -1030,6 +1047,8 @@ function appendEvent(event) {
       setRunning(false)
       refreshQueue()
       const reason = data.reason || {}
+      state.turnAlert = turnAlertFromReason(reason, Date.now())
+      renderTurnBanner()
       if (reason.kind === 'error') {
         addStrip(`Turn failed: ${reason.error?.message || reason.error?.code || 'unknown error'}`)
       } else if (reason.kind === 'aborted') {
@@ -1948,6 +1967,62 @@ function clearLive() {
     state.live = null
     state.liveText = ''
   }
+}
+
+/**
+ * A turn that ends abnormally, or never ends because the Host restarted, must be
+ * visible: a one-line note in the transcript is easy to miss and is gone after a
+ * reconnect. This banner stays until the next turn starts or the user dismisses
+ * it.
+ */
+function renderTurnBanner() {
+  const parent = el.log?.parentElement
+  if (!parent) return
+  let node = document.getElementById('turn-banner')
+  const info = state.turnAlert
+  if (!info) {
+    if (node) node.remove()
+    return
+  }
+  if (!node) {
+    node = document.createElement('div')
+    node.id = 'turn-banner'
+    node.className = 'turn-banner'
+    parent.insertBefore(node, el.log)
+  }
+  node.dataset.kind = info.kind
+  node.textContent = ''
+  const text = document.createElement('span')
+  text.textContent = info.text
+  const dismiss = document.createElement('button')
+  dismiss.type = 'button'
+  dismiss.className = 'turn-banner-close'
+  dismiss.textContent = '×'
+  dismiss.setAttribute('aria-label', 'Dismiss')
+  dismiss.addEventListener('click', () => {
+    state.turnAlert = null
+    renderTurnBanner()
+  })
+  node.append(text, dismiss)
+}
+
+const REASON_TEXT = {
+  aborted: 'Turn interrupted — it was stopped before finishing.',
+  'max-tokens': 'Turn stopped at the token limit; the answer is incomplete.',
+  error: 'Turn failed — the session may need another prompt.',
+}
+
+/** Turn the reason of a finished turn into banner text. */
+function turnAlertFromReason(reason, at) {
+  const kind = reason?.kind || 'unknown'
+  const when = at ? ' · ' + new Date(at).toLocaleTimeString() : ''
+  if (kind === 'aborted') return { kind, text: REASON_TEXT.aborted + when }
+  if (kind === 'max-tokens') return { kind, text: REASON_TEXT['max-tokens'] + when }
+  if (kind === 'error') {
+    const message = reason?.error?.message || reason?.error?.code || 'unknown error'
+    return { kind, text: REASON_TEXT.error + ' (' + message + ')' + when }
+  }
+  return null
 }
 
 /* ---------------- actions ---------------- */

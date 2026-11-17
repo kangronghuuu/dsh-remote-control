@@ -385,6 +385,31 @@ details.tool.error summary .tool-name { color: var(--danger); }
   padding: 2px 8px;
 }
 
+.turn-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 14px 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-raised, rgba(255, 180, 0, .12));
+  color: var(--text);
+}
+.turn-banner[data-kind="error"] { border-color: var(--bad, #d9534f); background: rgba(217, 83, 79, .12); }
+.turn-banner[data-kind="interrupted"] { border-color: var(--warn, #d9a441); background: rgba(217, 164, 65, .14); }
+.turn-banner span { flex: 1; }
+.turn-banner-close {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
 .strip {
   align-self: stretch;
   font-size: 13px;
