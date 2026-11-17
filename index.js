@@ -367,6 +367,15 @@ export function apply(ctx, rawConfig) {
     identity: () => deviceIdentity,
     hitl: () => hitl,
     readAttachment: readAttachmentForPeer,
+    // Called when a peer stops answering twice in a row: a network change is the
+    // usual cause, so re-run discovery and rotate the lane without the operator
+    // touching anything.
+    onPeerStuck: (deviceId) => {
+      void discoverTailnetPeers().catch(() => {})
+      setTimeout(() => {
+        try { void fabric.rehandshake(deviceId).catch(() => {}) } catch { /* starting up */ }
+      }, 1200)
+    },
     limits: { rateMax: config.rateMax, rateWindowMs: config.rateWindowMs },
     self: () => ({
       deviceId: state?.deviceId ?? '',

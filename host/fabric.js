@@ -75,7 +75,7 @@ function scopeFor(method, pathname) {
  * Everything here is plain Node so it can be exercised without Cordis:
  * `sessions` is a small facade over the Host's session controller.
  */
-export function createFabric({ log, config, self, sessions, stateFile, store, uploads, identity, hitl, readAttachment, limits = {} }) {
+export function createFabric({ log, config, self, sessions, stateFile, store, uploads, identity, hitl, readAttachment, onPeerStuck, limits = {} }) {
   const approvalStore = store ?? createFileStore(stateFile, log)
   const rate = new Map() // deviceId -> { count, resetAt }
   const rateLimit = {
@@ -561,6 +561,30 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
     })
     // Fresh discovery evidence: retry the direct lane on the next call.
     routeBlocks.delete(message.deviceId)
+  }
+
+  // A changed network invalidates whatever route was pinned: counting failures
+  // lets the fabric forget stale relay/punch/candidate data before the user has
+  // to notice.
+  const peerFailures = new Map()
+  function notePeerSuccess(deviceId) {
+    peerFailures.delete(deviceId)
+  }
+  function notePeerFailure(deviceId) {
+    const count = (peerFailures.get(deviceId) ?? 0) + 1
+    peerFailures.set(deviceId, count)
+    if (count < 2) return
+    peerFailures.delete(deviceId)
+    const entry = approvals.get(deviceId)
+    if (entry && (entry.relay || entry.punch)) {
+      approvals.set(deviceId, { ...entry, relay: '', punch: null })
+      saveApprovals().catch(() => {})
+    }
+    const peer = peers.get(deviceId)
+    if (peer) peers.set(deviceId, { ...peer, relay: '', punch: null, candidates: [], proto: 'http' })
+    routeBlocks.delete(deviceId)
+    log.warn('[remote-control] peer ' + deviceId + ' unreachable twice; dropped pinned routes')
+    try { onPeerStuck?.(deviceId) } catch { /* the Host may be shutting down */ }
   }
 
   function reap() {
@@ -1236,6 +1260,8 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
       peer.lastTransport = lane
       peer.lastTiming = { lane, ms: elapsed, at: Date.now() }
       log.info(`[remote-control] ${method} ${pathname} ${deviceId} via ${lane} in ${elapsed}ms`)
+      if (result?.error) notePeerFailure(deviceId)
+      else notePeerSuccess(deviceId)
       return result
     }
 
@@ -1587,6 +1613,8 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
     stop,
     connect,
     clearPeerRelay: peerRelayBroken,
+    rehandshake: rehandshakePeer,
+    rediscover: () => { for (const deviceId of approvals.keys()) routeBlocks.delete(deviceId) },
     approveRequest,
     denyRequest,
     callPeer,
