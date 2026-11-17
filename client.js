@@ -941,7 +941,7 @@ window.__ModuleLoader__.load({
                   : (blank
                     ? 'This session is empty. Send a message to start it.'
                     : 'No messages yet. Send one below.'))
-            : renderEntries(entries),
+            : renderEntries(entries, { peerId, onOpenFile: setPreview }),
           streamState === 'error' && entries.length > 0
             ? h('div', { style: S.note }, 'Stream lost — retrying…')
             : null,
@@ -1036,7 +1036,7 @@ window.__ModuleLoader__.load({
       return h('div', { key: 'turn-' + entry.key, 'data-turn': entry.turn, style: { display: 'contents' } }, node)
     }
 
-    function renderEntries(entries) {
+    function renderEntries(entries, context = {}) {
       const nodes = []
       for (let index = 0; index < entries.length; index += 1) {
         const entry = entries[index]
@@ -1049,24 +1049,24 @@ window.__ModuleLoader__.load({
           nodes.push(wrapTurn(entry, h('div', { key: entry.key, style: S.toolRow }, `⚙ ${entry.text}${count > 1 ? ' ×' + count : ''}`)))
           continue
         }
-        nodes.push(wrapTurn(entry, renderEntry(entry)))
+        nodes.push(wrapTurn(entry, renderEntry(entry, context)))
       }
       return nodes
     }
 
-    function renderEntry(entry) {
+    function renderEntry(entry, context = {}) {
       if (entry.kind === 'user') {
         return h('div', { key: entry.key, style: { ...S.bubble, ...S.userBubble } },
           entry.text ? h('div', { style: { whiteSpace: 'pre-wrap' } }, entry.text) : null,
           entry.images?.length
-            ? h('div', { style: S.imageRow }, entry.images.map((ref, position) => h(AttachmentImage, { key: (ref.attachmentId || '') + position, peerId, ref })))
+            ? h('div', { style: S.imageRow }, entry.images.map((ref, position) => h(AttachmentImage, { key: (ref.attachmentId || '') + position, peerId: context.peerId, ref })))
             : null,
           entry.files?.length
             ? h('div', { style: S.imageRow }, entry.files.map((ref, position) => h('button', {
               key: (ref.attachmentId || '') + position,
               type: 'button',
               style: S.fileChip,
-              onClick: () => setPreview(ref),
+              onClick: () => context.onOpenFile?.(ref),
             }, '\ud83d\udcc4 ' + (ref.name || 'file'))))
             : null,
 
