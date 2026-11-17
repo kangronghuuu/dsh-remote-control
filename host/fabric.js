@@ -19,6 +19,11 @@ const REQUEST_TTL_MS = 10 * 60 * 1000
 const CLOCK_SKEW_MS = 5 * 60 * 1000
 /** Statuses that mean "the peer answered", as opposed to the relay failing. */
 const PEER_LEVEL_STATUS = new Set([400, 401, 403, 409, 413, 422, 429])
+
+// callDirect() is module-level, but the rehandshake routine lives inside
+// createFabric(). The factory installs it here so a stale lane can be rotated
+// from the shared transport code.
+let rehandshakeHook = null
 // Upload chunks carry up to 1 MiB of base64 (~1.4 MiB of JSON), above the
 // default body cap; the relay's own per-message cap stays at 2 MiB.
 const UPLOAD_BODY_BYTES = 4 * 1024 * 1024
@@ -326,6 +331,7 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
 
   /** Rotate the ephemeral channel with one approved peer. */
   async function rehandshakePeer(peerDeviceId) {
+
     const peer = peers.get(peerDeviceId)
     if (!peer) return { ok: false, error: 'unknown-peer' }
     // Two simultaneous initiators would each install a different ephemeral and
@@ -863,7 +869,9 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
     // A pinned peer on the direct transport must use the sealed lane; relay
     // traffic is already inside the relay AEAD envelope.
     let lanePair
-    if (!fromRelay && verdict.approval?.publicKey && pathname !== '/peer/stream') {
+    // /peer/rehandshake bootstraps a fresh lane precisely when the old one is
+    // stale, so it is signature-authenticated but deliberately unsealed.
+    if (!fromRelay && verdict.approval?.publicKey && pathname !== '/peer/stream' && pathname !== '/peer/rehandshake') {
       if (String(req.headers['x-dsh-lane'] || '') !== 'sealed') {
         return json(res, 403, { error: 'plaintext-not-allowed' })
       }
@@ -1433,6 +1441,9 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
     upstream.end()
   }
 
+  // give the module-level transport code a way to rotate a stale lane
+  rehandshakeHook = rehandshakePeer
+
   return {
     start,
     stop,
@@ -1585,7 +1596,9 @@ async function callDirect(peer, method, pathname, body, secret, callerId, extraH
   // A lane can go stale when the peer restarted and forgot its ephemeral key.
   // Rotate it over the unsealed handshake and retry once before giving up.
   if (allowHeal && (first?.error === 'bad-envelope' || first?.json?.error === 'bad-envelope')) {
-    const healed = await rehandshakePeer(peer.deviceId).catch(() => undefined)
+    const healed = typeof rehandshakeHook === 'function'
+      ? await rehandshakeHook(peer.deviceId).catch(() => undefined)
+      : undefined
     if (healed?.ok) {
       return await callRaw(peer, method, pathname, body, secret, callerId, extraHeaders, lane, timeoutMs)
     }
