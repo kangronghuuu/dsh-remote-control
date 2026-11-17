@@ -54,6 +54,12 @@ window.__ModuleLoader__.load({
       },
       userBubble: { alignSelf: 'flex-end', background: 'var(--dsw-alias-bg-layer-2)' },
       assistantBubble: { alignSelf: 'flex-start', background: 'var(--dsw-alias-bg-layer-1)' },
+      toolBlock: { alignSelf: 'flex-start', maxWidth: '100%', fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' },
+      toolPre: {
+        margin: '4px 0 0', padding: '8px', borderRadius: '8px', maxHeight: '260px', overflow: 'auto',
+        background: 'var(--dsw-alias-bg-layer-3, rgba(127,127,127,.12))',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '11px', whiteSpace: 'pre-wrap',
+      },
       toolRow: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', alignSelf: 'flex-start' },
       note: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', alignSelf: 'center' },
       composer: {
@@ -299,6 +305,30 @@ window.__ModuleLoader__.load({
       return html.join('\n')
     }
 
+    // Telemetry that would bury the transcript; the web UI hides it too.
+    const NOISE_EVENTS = new Set([
+      'session-log-deepseek/delivery-accepted',
+      'step/start', 'step/end',
+      'job/registered', 'job/settled',
+      'tool-workflow/agent-start', 'tool-workflow/agent-end',
+      'agent/inbox/spliced',
+    ])
+
+    const PROCESS_LABELS = {
+      'todo/write': 'plan updated',
+      'workspace/changes': 'workspace changed',
+      'approval/asked': 'approval requested',
+      'approval/decided': 'approval decided',
+      'command/run': 'command started',
+      'command/done': 'command finished',
+      'compaction/start': 'compacting context',
+      'compaction/end': 'context compacted',
+      'compaction/summary': 'context compacted',
+      'compaction/prune': 'context pruned',
+      'compact/start': 'compacting context',
+      'compact/end': 'context compacted',
+    }
+
     function Chat({ peerId, sessionId, title, blank, initialScrollTop, initialPinned, onScrollTop }) {
       const [entries, setEntries] = useState([])
       const [live, setLive] = useState('')
@@ -358,7 +388,7 @@ window.__ModuleLoader__.load({
               const entry = toEntry(record?.event, seen.current)
               if (entry) batch.push(entry)
             }
-            if (batch.length > 0) setEntries((current) => current.concat(batch))
+            if (batch.length > 0) setEntries((current) => mergeEntries(current, batch))
             return
           }
           if (frame.type === 'event') {
@@ -368,7 +398,7 @@ window.__ModuleLoader__.load({
             if (entry.kind === 'turn-end') { setRunning(false); return }
             if (entry.kind === 'live-reset') { setLive(''); return }
             if (entry.kind === 'assistant') setLive('')
-            setEntries((current) => current.concat([entry]))
+            setEntries((current) => mergeEntries(current, [entry]))
             return
           }
           if (frame.type === 'assistant-stream') {
@@ -417,6 +447,28 @@ window.__ModuleLoader__.load({
         event.preventDefault()
         addFiles(event.dataTransfer?.files)
       }, [addFiles])
+
+      // A tool result belongs to its call, not to a new row.
+      const mergeEntries = (current, incoming) => {
+        const next = current.slice()
+        for (const entry of incoming) {
+          if (entry.kind === 'tool-result') {
+            let merged = false
+            for (let index = next.length - 1; index >= 0; index -= 1) {
+              const item = next[index]
+              if (item.kind === 'tool' && item.callId === entry.callId) {
+                next[index] = { ...item, output: entry.output, failed: entry.failed }
+                merged = true
+                break
+              }
+            }
+            if (!merged) next.push({ ...entry, kind: 'tool', name: 'tool' })
+            continue
+          }
+          next.push(entry)
+        }
+        return next
+      }
 
       const send = useCallback(async () => {
         const text = draft.trim()
@@ -575,7 +627,7 @@ window.__ModuleLoader__.load({
                   : (blank
                     ? 'This session is empty. Send a message to start it.'
                     : 'No messages yet. Send one below.'))
-            : entries.map((entry) => renderEntry(entry)),
+            : renderEntries(entries),
           streamState === 'error' && entries.length > 0
             ? h('div', { style: S.note }, 'Stream lost — retrying…')
             : null,
@@ -646,6 +698,24 @@ window.__ModuleLoader__.load({
       )
     }
 
+    function renderEntries(entries) {
+      const nodes = []
+      for (let index = 0; index < entries.length; index += 1) {
+        const entry = entries[index]
+        if (entry.kind === 'process') {
+          let count = 1
+          while (index + 1 < entries.length && entries[index + 1].kind === 'process' && entries[index + 1].text === entry.text) {
+            count += 1
+            index += 1
+          }
+          nodes.push(h('div', { key: entry.key, style: S.toolRow }, `⚙ ${entry.text}${count > 1 ? ' ×' + count : ''}`))
+          continue
+        }
+        nodes.push(renderEntry(entry))
+      }
+      return nodes
+    }
+
     function renderEntry(entry) {
       if (entry.kind === 'user') return h('div', { key: entry.key, style: { ...S.bubble, ...S.userBubble } }, entry.text)
       if (entry.kind === 'assistant') return h('div', {
@@ -654,7 +724,25 @@ window.__ModuleLoader__.load({
         className: 'rc-md',
         dangerouslySetInnerHTML: { __html: markdownHtml(entry.text) },
       })
-      if (entry.kind === 'tool') return h('div', { key: entry.key, style: S.toolRow }, `⚙ ${entry.text}`)
+      if (entry.kind === 'tool') {
+        const argsText = entry.args ? JSON.stringify(entry.args, null, 2) : entry.raw
+        const hasResult = entry.output !== undefined
+        return h('details', { key: entry.key, style: S.toolBlock },
+          h('summary', { style: { cursor: 'pointer' } },
+            '\u2699 ' + entry.name + (entry.hint ? '  ' + entry.hint : '') + (hasResult ? '' : '  \u2026')),
+          argsText ? h('pre', { style: S.toolPre }, argsText) : null,
+          hasResult
+            ? h('pre', { style: { ...S.toolPre, ...(entry.failed ? { color: '#ff8c8c' } : {}) } },
+              entry.output || (entry.failed ? '(failed with no output)' : '(no output)'))
+            : null,
+        )
+      }
+      if (entry.kind === 'reasoning') {
+        return h('details', { key: entry.key, style: S.toolBlock },
+          h('summary', { style: { cursor: 'pointer' } }, 'thinking\u2026'),
+          h('div', { style: { whiteSpace: 'pre-wrap', fontSize: 12 } }, entry.text),
+        )
+      }
       return h('div', { key: entry.key, style: S.note }, entry.text)
     }
 
@@ -680,16 +768,47 @@ window.__ModuleLoader__.load({
           const text = blocksText(data.message?.content)
           return text ? { key, kind: 'assistant', text } : null
         }
-        case 'tool/call':
-          return { key, kind: 'tool', text: String(data.name || 'tool') }
+        case 'tool/call': {
+          const name = String(data.name || 'tool')
+          let args = null
+          try { args = JSON.parse(data.arguments || '{}') } catch { args = null }
+          const hint = args && typeof args === 'object'
+            ? String(args.command || args.path || args.file_path || args.query || args.description || '').replace(/\s+/g, ' ').slice(0, 90)
+            : ''
+          return {
+            key,
+            kind: 'tool',
+            callId: String(data.callId || data.id || ''),
+            name,
+            args,
+            raw: typeof data.arguments === 'string' ? data.arguments : '',
+            hint,
+          }
+        }
+        case 'tool/result': {
+          const output = blocksText(data.message?.content)
+          return {
+            key,
+            kind: 'tool-result',
+            callId: String(data.message?.toolCallId || data.callId || ''),
+            output,
+            failed: Boolean(data.error) || data.message?.isError === true,
+          }
+        }
+        case 'assistant/attempt': {
+          const reasoning = String(data.reasoning ?? data.message?.reasoning ?? '').trim()
+          return reasoning ? { key, kind: 'reasoning', text: reasoning } : null
+        }
         case 'turn/start':
           return { key, kind: 'turn-start' }
         case 'turn/end':
           return { key, kind: 'turn-end' }
         case 'session/title':
           return null
-        default:
-          return null
+        default: {
+          if (NOISE_EVENTS.has(event.type)) return null
+          return { key, kind: 'process', text: PROCESS_LABELS[event.type] || event.type }
+        }
       }
     }
 
