@@ -135,6 +135,13 @@ export function apply(ctx, rawConfig) {
     async page(options) {
       const limit = Math.min(100, Math.max(1, Number(options?.limit) || 40))
       const offset = Math.max(0, Number(options?.cursor) || 0)
+      // Restoring a saved session must not depend on it being on page one.
+      const wantedId = typeof options?.id === 'string' ? options.id : ''
+      if (wantedId) {
+        if (sessionsListCache.items.length === 0) await refreshSessionList()
+        const found = sessionsListCache.items.find((item) => item.id === wantedId)
+        return { items: found ? [found] : [], total: found ? 1 : 0, nextCursor: null }
+      }
       // Stale-while-revalidate. A peer call must never pay for a cold refresh:
       // with data present the current page is served and a refresh runs behind
       // it; only the very first call waits, and only briefly.
@@ -1090,7 +1097,8 @@ export function apply(ctx, rawConfig) {
       if (operation === 'sessions' && req.method === 'GET') {
         const limit = String(url.searchParams.get('limit') || '')
         const cursor = String(url.searchParams.get('cursor') || '')
-        const reply = await fabric.callPeer(deviceId, 'GET', '/peer/sessions?limit=' + encodeURIComponent(limit) + '&cursor=' + encodeURIComponent(cursor), undefined, { race: true })
+        const sessionQuery = String(url.searchParams.get('id') || '')
+        const reply = await fabric.callPeer(deviceId, 'GET', '/peer/sessions?limit=' + encodeURIComponent(limit) + '&cursor=' + encodeURIComponent(cursor) + '&id=' + encodeURIComponent(sessionQuery), undefined, { race: true })
         return json(res, reply.status ?? (reply.ok ? 200 : 502), reply.json ?? { error: reply.error })
       }
       if (operation === 'stream' && req.method === 'GET') {
@@ -1553,7 +1561,8 @@ export function apply(ctx, rawConfig) {
   async function listSessions(res, url) {
     const limit = String(url?.searchParams?.get('limit') || '')
     const cursor = String(url?.searchParams?.get('cursor') || '')
-    const page = await sessions.page({ limit, cursor })
+    const id = String(url?.searchParams?.get('id') || '')
+    const page = await sessions.page({ limit, cursor, id })
     return json(res, 200, { items: page.items, total: page.total, nextCursor: page.nextCursor })
   }
 

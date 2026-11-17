@@ -1009,6 +1009,7 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
         const page = await sessions.page({
           limit: url.searchParams.get('limit'),
           cursor: url.searchParams.get('cursor'),
+          id: url.searchParams.get('id') || '',
         })
         return reply(200, { items: page.items, total: page.total, nextCursor: page.nextCursor })
       }

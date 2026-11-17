@@ -496,6 +496,30 @@ window.__ModuleLoader__.load({
      * An image lives on the Host that owns the session, so it arrives as base64
      * over the peer channel and is shown from a data URL.
      */
+    /**
+     * An image the session produced: the file lives on the peer, so the bytes are
+     * fetched raw and shown from a data URL.
+     */
+    function PathImage({ peerId, sessionId, filePath }) {
+      const [src, setSrc] = useState('')
+      useEffect(() => {
+        let alive = true
+        const url = '/remote-control/api/peer/' + encodeURIComponent(peerId) + '/file?sessionId=' + encodeURIComponent(sessionId) + '&path=' + encodeURIComponent(filePath) + '&raw=1'
+        api(url).then((value) => {
+          if (!alive || !value?.data) return
+          setSrc('data:' + (value.mediaType || 'image/png') + ';base64,' + value.data)
+        }).catch(() => {})
+        return () => { alive = false }
+      }, [peerId, sessionId, filePath])
+      if (!src) return h('span', { style: S.meta }, '\ud83d\uddbc ' + filePath.split('/').pop())
+      return h('img', {
+        src,
+        alt: filePath,
+        style: S.messageImage,
+        onClick: () => window.open(src, '_blank'),
+      })
+    }
+
     function AttachmentImage({ peerId, ref }) {
       const [src, setSrc] = useState('')
       useEffect(() => {
@@ -1187,7 +1211,7 @@ window.__ModuleLoader__.load({
                   : (blank
                     ? 'This session is empty. Send a message to start it.'
                     : 'No messages yet. Send one below.'))
-            : renderEntries(entries, { peerId, onOpenFile: setPreview }),
+            : renderEntries(entries, { peerId, sessionId, onOpenFile: setPreview }),
           streamState === 'error' && entries.length > 0
             ? h('div', { style: S.note }, 'Stream lost — retrying…')
             : null,
@@ -1328,12 +1352,32 @@ window.__ModuleLoader__.load({
       return nodes
     }
 
+    function splitVisualFiles(files) {
+      const images = []
+      const rest = []
+      for (const ref of Array.isArray(files) ? files : []) {
+        const name = String(ref?.name || ref?.path || '')
+        if (IMAGE_EXTENSIONS.test(name)) images.push(ref)
+        else rest.push(ref)
+      }
+      return { images, rest }
+    }
+
     function renderEntry(entry, context = {}) {
       if (entry.kind === 'user') {
+        const visuals = splitVisualFiles(entry.files)
         return h('div', { key: entry.key, style: { ...S.bubble, ...S.userBubble } },
           entry.text ? h('div', { style: { whiteSpace: 'pre-wrap' } }, entry.text) : null,
           entry.images?.length
             ? h('div', { style: S.imageRow }, entry.images.map((ref, position) => h(AttachmentImage, { key: (ref.attachmentId || '') + position, peerId: context.peerId, ref })))
+            : null,
+          visuals.images.length
+            ? h('div', { style: S.imageRow }, visuals.images.map((ref, position) => h(PathImage, {
+              key: 'up' + position,
+              peerId: context.peerId,
+              sessionId: context.sessionId,
+              filePath: String(ref?.path || ref?.name || ''),
+            })))
             : null,
           entry.files?.length
             ? h('div', { style: S.imageRow }, entry.files.map((ref, position) => h('button', {
@@ -1347,7 +1391,19 @@ window.__ModuleLoader__.load({
         )
       }
       if (entry.kind === 'assistant') {
+        const visuals = splitVisualFiles(entry.files)
         return h('div', { key: entry.key, style: { ...S.bubble, ...S.assistantBubble } },
+          entry.images?.length
+            ? h('div', { style: S.imageRow }, entry.images.map((ref, position) => h(AttachmentImage, { key: 'a' + position, peerId: context.peerId, ref })))
+            : null,
+          visuals.images.length
+            ? h('div', { style: S.imageRow }, visuals.images.map((ref, position) => h(PathImage, {
+              key: 'p' + position,
+              peerId: context.peerId,
+              sessionId: context.sessionId,
+              filePath: String(ref?.path || ref?.name || ''),
+            })))
+            : null,
           entry.reasoning
             ? h('details', { style: S.reasoningBlock },
               h('summary', { style: { cursor: 'pointer' } }, 'Reasoning · ' + entry.reasoning.length + ' chars'),
@@ -1779,6 +1835,17 @@ window.__ModuleLoader__.load({
           if (target.sessionId && items.some((item) => item.id === target.sessionId)) {
             setSessionId(target.sessionId)
           } else if (target.sessionId) {
+            // It may be past the loaded page: ask the peer about that one session
+            // before claiming it is gone.
+            try {
+              const single = await api('/remote-control/api/peer/' + encodeURIComponent(peer.deviceId) + '/sessions?id=' + encodeURIComponent(target.sessionId))
+              const found = Array.isArray(single.items) ? single.items[0] : null
+              if (found) {
+                setSessions((current) => [found, ...(current || []).filter((item) => item.id !== found.id)])
+                setSessionId(found.id)
+                return
+              }
+            } catch { /* fall through to the notice */ }
             setNotice('The saved session is no longer available on that device. Pick another one.')
           }
         })()

@@ -285,6 +285,18 @@ async function loadSessions() {
     return
   }
   if (wanted) {
+    // It may simply be past the first page: ask the Host about that one session
+    // before claiming it is gone.
+    try {
+      const single = await request('/api/sessions?id=' + encodeURIComponent(wanted))
+      const found = Array.isArray(single.items) ? single.items[0] : null
+      if (found) {
+        state.sessions = [found, ...state.sessions.filter((session) => session.id !== found.id)]
+        renderSessions()
+        selectSession(found.id)
+        return
+      }
+    } catch { /* fall through to the notice */ }
     addStrip('The saved session is no longer available. Showing the latest one.')
     state.sessionId = null
   }
