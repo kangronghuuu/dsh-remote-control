@@ -64,6 +64,11 @@ window.__ModuleLoader__.load({
         marginTop: '4px', padding: '2px 7px', borderRadius: '6px', fontSize: '10px', cursor: 'pointer',
         background: 'transparent', color: 'inherit', border: '1px solid var(--dsw-alias-border-l1)',
       },
+      turnNav: { display: 'flex', alignItems: 'center', gap: '8px', alignSelf: 'flex-start' },
+      turnStep: {
+        padding: '0 7px', borderRadius: '6px', fontSize: '13px', lineHeight: '1.7', cursor: 'pointer',
+        background: 'transparent', color: 'inherit', border: '1px solid var(--dsw-alias-border-l1)',
+      },
       toolRow: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', alignSelf: 'flex-start' },
       note: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', alignSelf: 'center' },
       composer: {
@@ -417,6 +422,10 @@ window.__ModuleLoader__.load({
       const [configBusy, setConfigBusy] = useState(false)
       const seen = useRef(new Set())
       const logRef = useRef(null)
+      // Turn boundaries, so the transcript can be navigated turn by turn.
+      const turnMark = useRef({ pending: false, count: 0 })
+      const [turnCount, setTurnCount] = useState(0)
+      const [turnCursor, setTurnCursor] = useState(0)
       const pinned = useRef(initialPinned ?? true)
       const scrollSent = useRef(0)
 
@@ -448,7 +457,11 @@ window.__ModuleLoader__.load({
           if (frame.type === 'event') {
             const entry = toEntry(frame.event, seen.current)
             if (!entry) return
-            if (entry.kind === 'turn-start') { setRunning(true); return }
+            if (entry.kind === 'turn-start') {
+              turnMark.current.pending = true
+              setRunning(true)
+              return
+            }
             if (entry.kind === 'turn-end') { setRunning(false); return }
             if (entry.kind === 'live-reset') { setLive(''); return }
             if (entry.kind === 'assistant') setLive('')
@@ -505,7 +518,12 @@ window.__ModuleLoader__.load({
       // A tool result belongs to its call, not to a new row.
       const mergeEntries = (current, incoming) => {
         const next = current.slice()
-        for (const entry of incoming) {
+        for (const original of incoming) {
+          // The first entry after a turn/start belongs to that turn.
+          const entry = turnMark.current.pending && original.kind !== 'turn-start'
+            ? ((turnMark.current.pending = false), { ...original, turn: (turnMark.current.count += 1) })
+            : original
+          if (entry.turn) setTurnCount(entry.turn)
           if (entry.kind === 'tool-result') {
             let merged = false
             for (let index = next.length - 1; index >= 0; index -= 1) {
@@ -522,6 +540,16 @@ window.__ModuleLoader__.load({
           next.push(entry)
         }
         return next
+      }
+
+      const jumpTurn = (direction) => {
+        const total = turnMark.current.count
+        if (total === 0) return
+        const from = turnCursor || total
+        const target = Math.min(total, Math.max(1, from + direction))
+        setTurnCursor(target)
+        const node = logRef.current?.querySelector('[data-turn="' + target + '"]')
+        node?.scrollIntoView({ block: 'start', behavior: 'smooth' })
       }
 
       const send = useCallback(async () => {
@@ -652,6 +680,13 @@ window.__ModuleLoader__.load({
           style: { padding: '10px 18px', borderBottom: '1px solid var(--dsw-alias-border-l1)', fontSize: '13px', fontWeight: 600 },
         }, title || sessionId),
         error ? h('div', { style: S.error }, error) : null,
+        turnCount > 0
+          ? h('div', { style: S.turnNav },
+            h('button', { type: 'button', style: S.turnStep, title: 'Previous turn', onClick: () => jumpTurn(-1) }, '\u2039'),
+            h('span', { style: S.meta }, 'Turn ' + (turnCursor || turnCount) + '/' + turnCount),
+            h('button', { type: 'button', style: S.turnStep, title: 'Next turn', onClick: () => jumpTurn(1) }, '\u203a'),
+          )
+          : null,
         h('div', {
           ref: logRef,
           style: S.log,
@@ -752,6 +787,11 @@ window.__ModuleLoader__.load({
       )
     }
 
+    function wrapTurn(entry, node) {
+      if (!entry || !entry.turn) return node
+      return h('div', { key: 'turn-' + entry.key, 'data-turn': entry.turn, style: { display: 'contents' } }, node)
+    }
+
     function renderEntries(entries) {
       const nodes = []
       for (let index = 0; index < entries.length; index += 1) {
@@ -762,10 +802,10 @@ window.__ModuleLoader__.load({
             count += 1
             index += 1
           }
-          nodes.push(h('div', { key: entry.key, style: S.toolRow }, `⚙ ${entry.text}${count > 1 ? ' ×' + count : ''}`))
+          nodes.push(wrapTurn(entry, h('div', { key: entry.key, style: S.toolRow }, `⚙ ${entry.text}${count > 1 ? ' ×' + count : ''}`)))
           continue
         }
-        nodes.push(renderEntry(entry))
+        nodes.push(wrapTurn(entry, renderEntry(entry)))
       }
       return nodes
     }
