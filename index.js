@@ -120,6 +120,20 @@ export function apply(ctx, rawConfig) {
         signal,
       )
     },
+    async history(sessionId, before, maxMessages) {
+      const page = await ctx.sessionController.events({
+        address: { kind: 'session', sessionId },
+        ...(Number.isFinite(before) && before > 0 ? { beforeSeq: before } : {}),
+        maxMessages: Math.min(200, Math.max(10, Number(maxMessages) || 60)),
+      }, AbortSignal.timeout(20000))
+      return { records: page?.records ?? [], cursor: page?.cursor ?? null, hasMore: Boolean(page?.hasMore) }
+    },
+    async createSession(input) {
+      const request = {}
+      if (typeof input?.cwd === 'string' && input.cwd.trim()) request.cwd = input.cwd.trim()
+      else if (config.defaultCwd) request.cwd = config.defaultCwd
+      return ctx.sessionController.create(request)
+    },
     async state(sessionId) {
       const state = await ctx.sessionController.state({ sessionId }, AbortSignal.timeout(8000))
       const queue = (state?.queue ?? [])
@@ -887,6 +901,23 @@ export function apply(ctx, rawConfig) {
       return json(res, 200, await fabric.connect(String(body?.deviceId || '')))
     }
 
+      const pageMatch = action.match(/^\/peer\/([^/]+)\/(history|new-session)$/)
+      if (pageMatch) {
+        const deviceId = decodeURIComponent(pageMatch[1])
+        if (pageMatch[2] === 'history' && req.method === 'GET') {
+          const sessionId = String(url.searchParams.get('sessionId') || '')
+          const before = String(url.searchParams.get('before') || '')
+          const max = String(url.searchParams.get('max') || '')
+          const query = '/peer/history?sessionId=' + encodeURIComponent(sessionId) + '&before=' + encodeURIComponent(before) + '&max=' + encodeURIComponent(max)
+          const reply = await fabric.callPeer(deviceId, 'GET', query, undefined, { race: true })
+          return json(res, reply.status ?? (reply.ok ? 200 : 502), reply.json ?? { error: reply.error })
+        }
+        if (pageMatch[2] === 'new-session' && req.method === 'POST') {
+          const body = await readJson(req)
+          const reply = await fabric.callPeer(deviceId, 'POST', '/peer/new-session', body)
+          return json(res, reply.status ?? (reply.ok ? 200 : 502), reply.json ?? { error: reply.error })
+        }
+      }
       const stateMatch = action.match(/^\/peer\/([^/]+)\/(state|queue)$/)
       if (stateMatch) {
         const deviceId = decodeURIComponent(stateMatch[1])

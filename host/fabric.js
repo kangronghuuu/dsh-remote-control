@@ -50,6 +50,8 @@ const SCOPE_BY_PATH = [
   [/^\/peer\/attachment$/, () => 'transcript:read'],
   [/^\/peer\/state$/, () => 'transcript:read'],
   [/^\/peer\/queue$/, () => 'prompt:send'],
+  [/^\/peer\/history$/, () => 'transcript:read'],
+  [/^\/peer\/new-session$/, () => 'prompt:send'],
   [/^\/peer\/upload\//, () => 'files:write'],
 ]
 
@@ -978,6 +980,26 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
       const accepted = bridge.answer(requestId, body)
       // A stale card (already answered elsewhere) is a conflict, not a failure.
       return accepted ? reply(200, { ok: true }) : reply(409, { error: 'stale-request' })
+    }
+    if (pathname === '/peer/history' && req.method === 'GET') {
+      if (typeof sessions.history !== 'function') return reply(503, { error: 'history-unavailable' })
+      const sessionId = String(url.searchParams.get('sessionId') || '')
+      if (!sessionId) return reply(400, { error: 'missing-session' })
+      const before = Number(url.searchParams.get('before'))
+      const max = Number(url.searchParams.get('max'))
+      try {
+        return reply(200, await sessions.history(sessionId, before, max))
+      } catch (error) {
+        return reply(500, { error: 'history-failed', message: error?.message || String(error) })
+      }
+    }
+    if (pathname === '/peer/new-session' && req.method === 'POST') {
+      if (typeof sessions.createSession !== 'function') return reply(503, { error: 'session-create-unavailable' })
+      try {
+        return reply(200, await sessions.createSession(body))
+      } catch (error) {
+        return reply(500, { error: 'session-create-failed', message: error?.message || String(error) })
+      }
     }
     if (pathname === '/peer/state' && req.method === 'GET') {
       const sessionId = String(url.searchParams.get('sessionId') || '')

@@ -79,6 +79,20 @@ window.__ModuleLoader__.load({
         background: 'transparent', color: 'inherit', border: '1px solid var(--dsw-alias-border-l1)',
       },
       modeRow: { display: 'flex', alignItems: 'center', gap: '6px', paddingBottom: '4px' },
+      smallButton: {
+        padding: '1px 8px', borderRadius: '6px', fontSize: '11px', lineHeight: '1.7', cursor: 'pointer',
+        background: 'transparent', color: 'inherit', border: '1px solid var(--dsw-alias-border-l1)',
+      },
+      fileChip: {
+        padding: '2px 8px', borderRadius: '999px', fontSize: '11px', cursor: 'pointer',
+        background: 'transparent', color: 'inherit', border: '1px solid var(--dsw-alias-border-l1)',
+      },
+      sheet: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 },
+      sheetCard: {
+        width: 'min(92vw, 640px)', maxHeight: '80vh', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '8px',
+        padding: '14px', borderRadius: '12px', background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l1)',
+      },
+      sheetText: { margin: 0, padding: '8px', borderRadius: '8px', fontSize: '11px', whiteSpace: 'pre-wrap', maxHeight: '52vh', overflow: 'auto', background: 'var(--dsw-alias-bg-layer-3, rgba(127,127,127,.12))' },
       hitlCard: {
         display: 'flex', flexDirection: 'column', gap: '6px', padding: '9px 11px', borderRadius: '10px',
         border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)',
@@ -402,6 +416,13 @@ window.__ModuleLoader__.load({
      * One pending approval or question raised on the peer that owns the session.
      * Answered over the peer channel, then the poll clears it.
      */
+    function blocksFiles(content) {
+      if (!Array.isArray(content)) return []
+      return content
+        .filter((block) => block && block.type === 'file' && block.attachment && typeof block.attachment === 'object')
+        .map((block) => block.attachment)
+    }
+
     function blocksImages(content) {
       if (!Array.isArray(content)) return []
       return content
@@ -433,6 +454,46 @@ window.__ModuleLoader__.load({
       })
     }
 
+    /**
+     * A non-image attachment: text opens inline, anything else downloads. The
+     * bytes come over the peer channel like images do.
+     */
+    function FileSheet({ peerId, ref, onClose }) {
+      const [state, setState] = useState({ status: 'loading', text: '', dataUrl: '' })
+      useEffect(() => {
+        let alive = true
+        const url = '/remote-control/api/peer/' + encodeURIComponent(peerId) + '/attachment?ref=' + encodeURIComponent(JSON.stringify(ref))
+        api(url).then((value) => {
+          if (!alive || !value?.data) { if (alive) setState({ status: 'error', text: '', dataUrl: '' }); return }
+          const mediaType = value.mediaType || 'application/octet-stream'
+          const dataUrl = 'data:' + mediaType + ';base64,' + value.data
+          if (mediaType.startsWith('text/') || mediaType === 'application/json') {
+            try {
+              const text = decodeURIComponent(escape(window.atob(value.data)))
+              setState({ status: 'text', text, dataUrl })
+            } catch { setState({ status: 'binary', text: '', dataUrl }) }
+          } else {
+            setState({ status: 'binary', text: '', dataUrl })
+          }
+        }).catch(() => { if (alive) setState({ status: 'error', text: '', dataUrl: '' }) })
+        return () => { alive = false }
+      }, [peerId, ref])
+      return h('div', { style: S.sheet, onClick: (event) => { if (event.target === event.currentTarget) onClose() } },
+        h('div', { style: S.sheetCard },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+            h('strong', { style: { flex: 1, fontSize: '13px' } }, ref?.name || 'Attachment'),
+            h('button', { type: 'button', style: S.button, onClick: onClose }, 'Close'),
+          ),
+          state.status === 'loading' ? h('div', { style: S.meta }, 'Loading\u2026') : null,
+          state.status === 'error' ? h('div', { style: S.meta }, 'Could not load this attachment.') : null,
+          state.status === 'text' ? h('pre', { style: S.sheetText }, state.text) : null,
+          state.status === 'binary'
+            ? h('a', { href: state.dataUrl, download: ref?.name || 'attachment', style: S.button }, 'Download ' + (ref?.name || 'file'))
+            : null,
+        ),
+      )
+    }
+
     function HitlCard({ item, onAnswer }) {
       const question = Array.isArray(item.questions) ? item.questions[0] : null
       const options = Array.isArray(question?.options) ? question.options : []
@@ -461,7 +522,7 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function Chat({ peerId, sessionId, title, blank, initialScrollTop, initialPinned, onScrollTop }) {
+    function Chat({ peerId, sessionId, title, blank, initialScrollTop, initialPinned, onScrollTop, onNewSession }) {
       const [entries, setEntries] = useState([])
       const [live, setLive] = useState('')
       const [running, setRunning] = useState(false)
@@ -672,6 +733,33 @@ window.__ModuleLoader__.load({
         refreshQueue()
       }
 
+      // Older pages, a new session, and the attachment sheet.
+      const [earlier, setEarlier] = useState({ hasMore: false, cursor: null, loading: false })
+      const [preview, setPreview] = useState(null)
+      const loadEarlier = async () => {
+        if (earlier.loading) return
+        setEarlier((value) => ({ ...value, loading: true }))
+        try {
+          const query = '/remote-control/api/peer/' + encodeURIComponent(peerId) + '/history?sessionId=' + encodeURIComponent(sessionId) + (earlier.cursor ? '&before=' + encodeURIComponent(earlier.cursor) : '')
+          const page = await api(query)
+          const fresh = new Set()
+          const older = []
+          for (const record of page?.records || []) {
+            const entry = toEntry(record?.event, fresh)
+            if (entry && !entry.kind.endsWith('start') && !entry.kind.endsWith('end')) older.push(entry)
+          }
+          if (older.length > 0) setEntries((current) => older.concat(current.filter((entry) => !older.some((item) => item.key === entry.key))))
+          setEarlier({ hasMore: Boolean(page?.hasMore), cursor: page?.cursor ?? null, loading: false })
+        } catch {
+          setEarlier((value) => ({ ...value, hasMore: false, loading: false }))
+        }
+      }
+      const scrollJump = (where) => {
+        const node = logRef.current
+        if (!node) return
+        node.scrollTo({ top: where === 'top' ? 0 : node.scrollHeight, behavior: 'smooth' })
+      }
+
       const send = useCallback(async () => {
         const text = draft.trim()
         const pending = pendingFiles
@@ -797,9 +885,17 @@ window.__ModuleLoader__.load({
         : null
 
       return h('div', { style: { ...S.column, flex: 1, minHeight: 0 } },
+        preview ? h(FileSheet, { peerId, ref: preview, onClose: () => setPreview(null) }) : null,
         h('div', {
           style: { padding: '10px 18px', borderBottom: '1px solid var(--dsw-alias-border-l1)', fontSize: '13px', fontWeight: 600 },
         }, title || sessionId),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
+          h('button', { type: 'button', style: S.smallButton, title: 'Scroll to top', onClick: () => scrollJump('top') }, '\u2191'),
+          h('button', { type: 'button', style: S.smallButton, title: 'Scroll to bottom', onClick: () => scrollJump('bottom') }, '\u2193'),
+          onNewSession
+            ? h('button', { type: 'button', style: S.smallButton, onClick: onNewSession }, 'New')
+            : null,
+        ),
         error ? h('div', { style: S.error }, error) : null,
         turnCount > 0
           ? h('div', { style: S.turnNav },
@@ -807,6 +903,14 @@ window.__ModuleLoader__.load({
             h('span', { style: S.meta }, 'Turn ' + (turnCursor || turnCount) + '/' + turnCount),
             h('button', { type: 'button', style: S.turnStep, title: 'Next turn', onClick: () => jumpTurn(1) }, '\u203a'),
           )
+          : null,
+        earlier.hasMore
+          ? h('button', {
+            type: 'button',
+            style: { ...S.smallButton, alignSelf: 'center' },
+            disabled: earlier.loading,
+            onClick: loadEarlier,
+          }, earlier.loading ? 'Loading\u2026' : 'Load earlier messages')
           : null,
         h('div', {
           ref: logRef,
@@ -957,6 +1061,15 @@ window.__ModuleLoader__.load({
           entry.images?.length
             ? h('div', { style: S.imageRow }, entry.images.map((ref, position) => h(AttachmentImage, { key: (ref.attachmentId || '') + position, peerId, ref })))
             : null,
+          entry.files?.length
+            ? h('div', { style: S.imageRow }, entry.files.map((ref, position) => h('button', {
+              key: (ref.attachmentId || '') + position,
+              type: 'button',
+              style: S.fileChip,
+              onClick: () => setPreview(ref),
+            }, '\ud83d\udcc4 ' + (ref.name || 'file'))))
+            : null,
+
         )
       }
       if (entry.kind === 'assistant') {
@@ -1018,15 +1131,17 @@ window.__ModuleLoader__.load({
           const content = data.content ?? data.message?.content
           const text = blocksText(content)
           const images = blocksImages(content)
-          if (!text && images.length === 0) return null
-          return { key, kind: 'user', text, images }
+          const files = blocksFiles(content)
+          if (!text && images.length === 0 && files.length === 0) return null
+          return { key, kind: 'user', text, images, files }
         }
         case 'assistant/message': {
           const content = data.message?.content
           const text = blocksText(content)
           const images = blocksImages(content)
-          if (!text && images.length === 0) return null
-          return { key, kind: 'assistant', text, images }
+          const files = blocksFiles(content)
+          if (!text && images.length === 0 && files.length === 0) return null
+          return { key, kind: 'assistant', text, images, files }
         }
         case 'tool/call': {
           const name = String(data.name || 'tool')
@@ -1841,6 +1956,16 @@ window.__ModuleLoader__.load({
                     sessionId
                       ? h(Chat, {
                         peerId: openPeer.deviceId,
+                        onNewSession: async () => {
+                          try {
+                            const created = await api('/remote-control/api/peer/' + encodeURIComponent(openPeer.deviceId) + '/new-session', {})
+                            await open(openPeer)
+                            const createdId = created?.sessionId || created?.id || created?.session?.id
+                            if (createdId) setSessionId(createdId)
+                          } catch (failure) {
+                            setError(failure.message)
+                          }
+                        },
                         sessionId,
                         title: sessions.find((session) => session.id === sessionId)?.title,
                         blank: sessions.find((session) => session.id === sessionId)?.blank === true,
