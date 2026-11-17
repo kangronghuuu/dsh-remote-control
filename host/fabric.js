@@ -503,14 +503,28 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
     if (message.deviceId === who.deviceId) return
 
     const existing = peers.get(message.deviceId)
-    peers.set(message.deviceId, {
-      deviceId: message.deviceId,
-      deviceName: typeof message.deviceName === 'string' ? message.deviceName : 'DSH device',
-      userId: typeof message.userId === 'string' ? message.userId : null,
+    const incoming = {
       address: rinfo.address,
       port: Number(message.port) || 57330,
       proto: message.proto === 'https' ? 'https' : 'http',
       origin: message.origin === 'tailnet' ? 'tailnet' : 'lan',
+    }
+    // Keep every address seen for this peer. A LAN address is only reachable on
+    // that subnet, so a broadcast announce must never displace a working tailnet
+    // candidate: doing that made calls flap between 200 and a 2s 502 timeout.
+    const previousCandidates = Array.isArray(existing?.candidates) ? existing.candidates : []
+    const candidates = previousCandidates
+      .filter((entry) => entry && typeof entry.address === 'string' && !(entry.address === incoming.address && entry.port === incoming.port))
+      .slice(0, 3)
+    candidates.push({ ...incoming, seenAt: Date.now() })
+    const keepActive = incoming.origin !== 'tailnet' && existing?.origin === 'tailnet'
+    peers.set(message.deviceId, {
+      ...(existing ?? {}),
+      deviceId: message.deviceId,
+      deviceName: typeof message.deviceName === 'string' ? message.deviceName : (existing?.deviceName ?? 'DSH device'),
+      userId: typeof message.userId === 'string' ? message.userId : (existing?.userId ?? null),
+      ...(keepActive ? {} : incoming),
+      candidates,
       lastSeen: Date.now(),
       approved: approvals.has(message.deviceId) || Boolean(existing?.approved),
       secret: approvals.get(message.deviceId)?.secret ?? existing?.secret,
@@ -1115,7 +1129,7 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
       const lane = pair
         ? { seal: (value) => pair.seal(value), open: (packet) => pair.open(packet).toString('utf8') }
         : undefined
-      const result = await callRaw(
+      const result = await callDirect(
         peer, method, pathname, body, secret, self().deviceId, auth, lane,
         config.directTimeoutMs ?? 1000,
       )
@@ -1136,7 +1150,7 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
       const lane = pair
         ? { seal: (value) => pair.seal(value), open: (packet) => pair.open(packet).toString('utf8') }
         : undefined
-      const directPromise = callRaw(
+      const directPromise = callDirect(
         peer, method, pathname, body, secret, self().deviceId, auth, lane,
         config.directTimeoutMs ?? 1000,
       ).then((result) => {
@@ -1491,7 +1505,12 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
           lane: peer.lastTransport === 'relay'
             ? 'relay'
             : selectLane({ sameLan: peer.proto !== 'relay', punched: Boolean(approvals.get(peer.deviceId)?.punch), relayAvailable: Boolean(relay) }),
-          transport: peer.lastTransport ?? (peer.proto === 'relay' ? 'relay' : (peer.origin === 'tailnet' ? 'tailnet' : 'lan')),
+          // Report the stable route rather than the lane of the last call: a
+          // tailnet peer must not be labelled "lan" just because the last
+          // attempt took the local path.
+          transport: peer.proto === 'relay' ? 'relay' : (peer.origin === 'tailnet' ? 'tailnet' : (peer.lastTransport ?? 'lan')),
+          origin: peer.origin === 'tailnet' ? 'tailnet' : 'lan',
+          candidates: Array.isArray(peer.candidates) ? peer.candidates.map((entry) => entry.origin + ':' + entry.address + ':' + entry.port) : [],
           timing: peer.lastTiming ?? null,
           blocked: { lan: laneBlocked(peer.deviceId, 'lan'), p2p: laneBlocked(peer.deviceId, 'p2p') },
           needsReapproval: Boolean(approvals.get(peer.deviceId)?.publicKey && !approvals.get(peer.deviceId)?.agreementKey),
@@ -1527,6 +1546,34 @@ function sign(secret, deviceId, method, pathname, timestamp, body) {
   return createHmac('sha256', secret)
     .update(`${deviceId}\n${method}\n${pathname}\n${timestamp}\n${body}`)
     .digest('hex')
+}
+
+/**
+ * A direct call with one retry on the peer's other known address. The announce
+ * seen last is not always the reachable one (LAN vs tailnet), so a failed
+ * attempt rotates the candidate instead of failing the whole call.
+ */
+async function callDirect(peer, method, pathname, body, secret, callerId, extraHeaders, lane, timeoutMs) {
+  const first = await callRaw(peer, method, pathname, body, secret, callerId, extraHeaders, lane, timeoutMs)
+  if (!first?.error || !Array.isArray(peer.candidates) || peer.candidates.length < 2) return first
+  for (const candidate of peer.candidates) {
+    if (!candidate || typeof candidate.address !== 'string') continue
+    if (candidate.address === peer.address && candidate.port === peer.port) continue
+    const alternative = {
+      ...peer,
+      address: candidate.address,
+      port: candidate.port,
+      proto: candidate.proto === 'https' ? 'https' : 'http',
+      origin: candidate.origin === 'tailnet' ? 'tailnet' : 'lan',
+    }
+    const retry = await callRaw(alternative, method, pathname, body, secret, callerId, extraHeaders, lane, timeoutMs)
+    if (!retry?.error) {
+      const current = peers.get(peer.deviceId)
+      if (current) peers.set(peer.deviceId, { ...current, address: alternative.address, port: alternative.port, proto: alternative.proto, origin: alternative.origin })
+      return retry
+    }
+  }
+  return first
 }
 
 function callRaw(peer, method, pathname, body, secret, callerId, extraHeaders, lane, timeoutMs = 15000) {
