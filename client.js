@@ -652,14 +652,47 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** Preferred order when a field arrives as a locale map. */
+    const LOCALIZED_ORDER = ['zh', 'en', 'ja', 'ko', 'de', 'fr', 'es', 'ru', 'pt', 'it']
+
+    /**
+     * Turn any server-provided label into a plain string.
+     * A string is already fine; a locale map ("zh", "en", ...) picks the first
+     * non-empty entry in preference order. Objects are never rendered directly:
+     * React rejects them (error #31) and the page would unmount.
+     */
+    function textOf(value) {
+      if (value === null || value === undefined) return ''
+      if (typeof value === 'string') return value
+      if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          const text = textOf(item)
+          if (text) return text
+        }
+        return ''
+      }
+      if (typeof value === 'object') {
+        for (const key of LOCALIZED_ORDER) {
+          const text = textOf(value[key])
+          if (text) return text
+        }
+        for (const entry of Object.values(value)) {
+          const text = textOf(entry)
+          if (text) return text
+        }
+      }
+      return ''
+    }
+
     function HitlCard({ item, onAnswer }) {
       const question = Array.isArray(item.questions) ? item.questions[0] : null
       const options = Array.isArray(question?.options) ? question.options : []
       return h('div', { style: S.hitlCard },
         h('div', { style: { fontWeight: 600, fontSize: 12 } },
-          (item.kind === 'approval' ? 'Approval needed' : 'Question') + (item.toolName ? ' \u00b7 ' + item.toolName : '')),
-        item.displayReason || item.reason
-          ? h('div', { style: S.metaWrap }, item.displayReason || item.reason)
+          (item.kind === 'approval' ? 'Approval needed' : 'Question') + (textOf(item.toolName) ? ' \u00b7 ' + textOf(item.toolName) : '')),
+        textOf(item.displayReason) || textOf(item.reason)
+          ? h('div', { style: S.metaWrap }, textOf(item.displayReason) || textOf(item.reason))
           : null,
         item.kind === 'approval'
           ? h('div', { style: { display: 'flex', gap: '8px' } },
@@ -667,14 +700,15 @@ window.__ModuleLoader__.load({
             h('button', { type: 'button', style: S.button, onClick: () => onAnswer(item, { decision: 'deny' }) }, 'Deny'),
           )
           : h('div', null,
-            question?.question ? h('div', { style: S.meta }, question.question) : null,
+            textOf(question?.question) ? h('div', { style: S.meta }, textOf(question?.question)) : null,
+            textOf(question?.detail) ? h('div', { style: S.metaWrap }, textOf(question?.detail)) : null,
             h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
               options.map((option) => h('button', {
-                key: String(option.id ?? option.value ?? option.label),
+                key: textOf(option.id) || textOf(option.value) || textOf(option.label),
                 type: 'button',
                 style: S.button,
                 onClick: () => onAnswer(item, { answers: [option.value ?? option.label ?? option] }),
-              }, String(option.label ?? option.value ?? option))),
+              }, textOf(option.label) || textOf(option.value) || textOf(option.id))),
             ),
           ),
       )

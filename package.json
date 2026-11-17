@@ -1,39 +1,39 @@
 {
-    "name":  "dsh-remote-control-plugin",
-    "version":  "0.7.55",
-    "type":  "module",
-    "description":  "Remote control for DSH: a Devices panel that discovers other DSH desktops signed into the same account, pairs with them once, and drives their sessions.",
-    "exports":  {
-                    ".":  "./index.js",
-                    "./client":  "./client.js",
-                    "./locale/*.json":  "./locale/*.json",
-                    "./icon":  "./icon.svg"
-                },
-    "files":  [
-                  "index.js",
-                  "client.js",
-                  "host/*.js",
-                  "cordis.patch.yml",
-                  "locale/*.json",
-                  "icon.svg",
-                  "README.md",
-                  "INSTALL.md",
-                  "web/index.html",
-                  "web/app.js",
-                  "web/app.css",
-                  "web/icon.svg",
-                  "docs"
-              ],
-    "dsh":  {
-                "bundle":  {
-                               "patch":  "./cordis.patch.yml"
-                           },
-                "client":  {
-                               "platform":  "web",
-                               "immediately":  true
-                           }
-            },
-    "publishConfig":  {
-                          "access":  "public"
-                      }
+  "name": "dsh-remote-control-plugin",
+  "version": "0.7.56",
+  "type": "module",
+  "description": "Remote control for DSH: a Devices panel that discovers other DSH desktops signed into the same account, pairs with them once, and drives their sessions.",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "host/*.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "INSTALL.md",
+    "web/index.html",
+    "web/app.js",
+    "web/app.css",
+    "web/icon.svg",
+    "docs"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }
