@@ -89,24 +89,41 @@ export function apply(ctx, rawConfig) {
   let tailnetAddress = ''
   let joinPairCode = ''
 
+  // The session list is queried by peers on every panel refresh. While a turn
+  // runs it can be slow, and a slow peer call reads as a dead link, so the last
+  // answer is reused briefly and served when a refresh times out.
+  const sessionsListCache = { at: 0, items: [] }
+
   const sessions = {
     async list() {
-      const value = await ctx.sessionController.list({}, AbortSignal.timeout(15000))
-      return (value?.items ?? [])
-        .filter((item) => item.origin !== 'subagent')
-        .map((item) => {
-          const projections = item.projections?.values ?? {}
-          const title = firstString(projections.title, projections.sessionTitle, projections['session-title'])
-          return {
-            id: item.sessionId,
-            title: title || '',
-            running: Boolean(item.running),
-            blank: Boolean(item.blank),
-            updatedAt: item.updatedAt ?? 0,
-            cwd: item.cwd ?? '',
-          }
-        })
-        .sort((a, b) => b.updatedAt - a.updatedAt)
+      const now = Date.now()
+      if (now - sessionsListCache.at < 2500) return sessionsListCache.items
+      try {
+        const value = await ctx.sessionController.list({}, AbortSignal.timeout(2500))
+        const items = (value?.items ?? [])
+          .filter((item) => item.origin !== 'subagent')
+          .map((item) => {
+            const projections = item.projections?.values ?? {}
+            const title = firstString(projections.title, projections.sessionTitle, projections['session-title'])
+            return {
+              id: item.sessionId,
+              title: title || '',
+              running: Boolean(item.running),
+              blank: Boolean(item.blank),
+              updatedAt: item.updatedAt ?? 0,
+              cwd: item.cwd ?? '',
+            }
+          })
+          .sort((a, b) => b.updatedAt - a.updatedAt)
+        sessionsListCache.at = Date.now()
+        sessionsListCache.items = items
+        return items
+      } catch {
+        // Busy turn or a slow controller: answer with the last known list rather
+        // than letting the peer time out and mark the link dead.
+        sessionsListCache.at = Date.now() - 2000
+        return sessionsListCache.items
+      }
     },
     follow(sessionId, signal) {
       return ctx.sessionController.follow(
@@ -486,6 +503,16 @@ export function apply(ctx, rawConfig) {
       }
       const firstTick = setTimeout(tick, 2500)
       firstTick.unref?.()
+      // The first cold session query over a large list takes ~2 s, which is
+      // longer than a peer's call timeout; refreshing in the background keeps
+      // /peer/sessions in the tens of milliseconds.
+      const warmSessions = () => {
+        try { void sessions.list().catch(() => {}) } catch { /* still starting */ }
+      }
+      const warmFirst = setTimeout(warmSessions, 1500)
+      warmFirst.unref?.()
+      const warmTimer = setInterval(warmSessions, 15_000)
+      warmTimer.unref?.()
       deviceIdentity = await loadOrCreateIdentity(
         identityFile,
         log,
