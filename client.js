@@ -795,7 +795,7 @@ window.__ModuleLoader__.load({
         if (!node || entries.length === 0) return
         restoredScroll.current = true
         if (typeof initialScrollTop === 'number' && initialScrollTop > 0) node.scrollTop = initialScrollTop
-      }, [entries, running])
+      }, [entries, running, runningKnown, sessionId])
 
       // Image chips get a local thumbnail so a paste is visibly accepted.
       const previews = useRef(new Map())
@@ -923,6 +923,25 @@ window.__ModuleLoader__.load({
       // A turn that stopped early (or never finished because the Host restarted)
       // has to be visible; a line in the transcript is easy to miss.
       const [turnAlert, setTurnAlert] = useState(null)
+      // Until the Host reports a running flag we cannot tell "still running" from
+      // "interrupted", so the interrupted alert waits for the first poll.
+      const [runningKnown, setRunningKnown] = useState(false)
+      const DISMISSED_KEY = 'dsh-remote-control:dismissed-alerts'
+      const readDismissed = () => {
+        try { return JSON.parse(window.localStorage.getItem(DISMISSED_KEY) || '{}') || {} } catch { return {} }
+      }
+      const isDismissed = (info) => readDismissed()[String(info?.key || '')] === true
+      const dismissTurnAlert = () => {
+        if (turnAlert) {
+          try {
+            const map = readDismissed()
+            map[String(turnAlert.key || '')] = true
+            window.localStorage.setItem(DISMISSED_KEY, JSON.stringify(map))
+          } catch { /* ignore */ }
+        }
+        setTurnAlert(null)
+      }
+
       useEffect(() => {
         // A turn that is still running has no end yet: that is normal, not an
         // interruption, so the alert is only computed once the peer says idle.
@@ -935,15 +954,19 @@ window.__ModuleLoader__.load({
         if (running) { setTurnAlert(null); return }
         const seqOf = (entry) => Number(String(entry?.key || '').replace(/^e/, '')) || 0
         if (lastStart && (!lastEnd || seqOf(lastStart) > seqOf(lastEnd))) {
-          setTurnAlert({ kind: 'interrupted', text: 'The last turn was interrupted (no completion was recorded).' })
+          // Still running, or not known yet: not an interruption.
+          if (running || !runningKnown) { setTurnAlert(null); return }
+          if (isDismissed(lastStart)) { setTurnAlert(null); return }
+          setTurnAlert({ kind: 'interrupted', key: lastStart.key, text: 'The last turn was interrupted (no completion was recorded).' })
           return
         }
         const reason = lastEnd?.reason || {}
         const when = lastEnd?.at ? ' · ' + new Date(lastEnd.at).toLocaleTimeString() : ''
-        if (reason.kind === 'aborted') setTurnAlert({ kind: 'aborted', text: 'Turn interrupted — it was stopped before finishing.' + when })
-        else if (reason.kind === 'interrupted') setTurnAlert({ kind: 'interrupted', text: 'Turn was interrupted — the Host restarted or the link dropped. The answer above is incomplete.' + when })
-        else if (reason.kind === 'max-tokens') setTurnAlert({ kind: 'max-tokens', text: 'Turn stopped at the token limit; the answer is incomplete.' + when })
-        else if (reason.kind === 'error') setTurnAlert({ kind: 'error', text: 'Turn failed: ' + (reason.error?.message || reason.error?.code || 'unknown error') + when })
+        if (lastEnd && isDismissed(lastEnd)) { setTurnAlert(null); return }
+        if (reason.kind === 'aborted') setTurnAlert({ kind: 'aborted', key: lastEnd?.key, text: 'Turn interrupted — it was stopped before finishing.' + when })
+        else if (reason.kind === 'interrupted') setTurnAlert({ kind: 'interrupted', key: lastEnd?.key, text: 'Turn was interrupted — the Host restarted or the link dropped. The answer above is incomplete.' + when })
+        else if (reason.kind === 'max-tokens') setTurnAlert({ kind: 'max-tokens', key: lastEnd?.key, text: 'Turn stopped at the token limit; the answer is incomplete.' + when })
+        else if (reason.kind === 'error') setTurnAlert({ kind: 'error', key: lastEnd?.key, text: 'Turn failed: ' + (reason.error?.message || reason.error?.code || 'unknown error') + when })
         else if (reason.kind && reason.kind !== 'completed') setTurnAlert({ kind: 'other', text: 'Turn ended unexpectedly (' + reason.kind + ')' + when })
         else setTurnAlert(null)
       }, [entries])
@@ -980,7 +1003,10 @@ window.__ModuleLoader__.load({
           setQueue(Array.isArray(value?.queue) ? value.queue : [])
           // The Host knows whether the session is running; the replayed events do
           // not always, so trust this poll over event-derived flags.
-          if (typeof value?.running === 'boolean') setRunning(value.running)
+          if (typeof value?.running === 'boolean') {
+            setRunning(value.running)
+            setRunningKnown(true)
+          }
         } catch { /* peer has no state route */ }
       }, [peerId, sessionId])
       useEffect(() => {
@@ -1181,7 +1207,7 @@ window.__ModuleLoader__.load({
         turnAlert
           ? h('div', { style: { ...S.turnBanner, ...(turnAlert.kind === 'error' ? S.turnBannerError : {}) } },
             h('span', { style: { flex: 1, minWidth: 0 } }, turnAlert.text),
-            h('button', { type: 'button', style: S.smallButton, onClick: () => setTurnAlert(null) }, 'Dismiss'),
+            h('button', { type: 'button', style: S.smallButton, onClick: dismissTurnAlert }, 'Dismiss'),
           )
           : null,
 

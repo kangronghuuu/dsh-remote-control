@@ -538,8 +538,14 @@ function handleFrame(frame) {
   if (frame.type === 'snapshot') {
     setStatus('live')
     if (typeof frame.cursor === 'number') state.lastSeq = Math.max(state.lastSeq, frame.cursor)
-    for (const record of frame.records || []) {
-      if (record?.type === 'event' && record.event) appendEvent(record.event)
+    // Replaying history is not "a new turn": it must not clear dismissals.
+    state.replaying = true
+    try {
+      for (const record of frame.records || []) {
+        if (record?.type === 'event' && record.event) appendEvent(record.event)
+      }
+    } finally {
+      state.replaying = false
     }
         const alertFromHistory = (() => {
       let lastStart = null
@@ -550,12 +556,28 @@ function handleFrame(frame) {
         if (event.type === 'turn/start') lastStart = event
         if (event.type === 'turn/end') lastEnd = event
       }
+      const running = state.running === true
       if (lastStart && (!lastEnd || (lastStart.seq ?? 0) > (lastEnd.seq ?? 0))) {
-        return { kind: 'interrupted', text: 'The last turn was interrupted (no completion was recorded).' }
+        // A turn that is still open is not an interruption.
+        if (running) return null
+        return {
+          kind: 'interrupted',
+          seq: lastStart.seq,
+          text: 'The last turn was interrupted (no completion was recorded).',
+        }
       }
-      return lastEnd ? turnAlertFromReason(lastEnd.data?.reason || {}, lastEnd.at || lastEnd.data?.at) : null
+      const fromEnd = lastEnd ? turnAlertFromReason(lastEnd.data?.reason || {}, lastEnd.at || lastEnd.data?.at) : null
+      return fromEnd ? { ...fromEnd, seq: lastEnd.seq } : null
     })()
-    if (alertFromHistory) { state.turnAlert = alertFromHistory; renderTurnBanner() }
+    const alert = alertFromHistory
+    if (alert && !isAlertDismissed(alert)) {
+      state.turnAlert = alert
+    } else {
+      // Already dismissed (or nothing to say): the replay may have raised it while
+      // the records were appended, so clear it explicitly.
+      state.turnAlert = null
+    }
+    renderTurnBanner()
     updateHistoryButton()
     return
   }
@@ -1063,6 +1085,12 @@ function appendEvent(event) {
       break
     case 'turn/start': {
       setRunning(true)
+      // Only a genuinely new turn invalidates earlier dismissals.
+      if (!state.replaying) {
+        try { window.localStorage.removeItem(DISMISSED_ALERTS_KEY) } catch { /* ignore */ }
+      }
+      state.turnAlert = null
+      renderTurnBanner()
       state.turnAlert = null
       renderTurnBanner()
       state.pendingTurn = typeof data.turn === 'number' ? data.turn : (state.turns.length + 1)
@@ -1073,7 +1101,7 @@ function appendEvent(event) {
       setRunning(false)
       refreshQueue()
       const reason = data.reason || {}
-      state.turnAlert = turnAlertFromReason(reason, Date.now())
+      // Carry the seq so the dismissal key matches the one derived from history.\n      const fromReason = turnAlertFromReason(reason, Date.now())\n      state.turnAlert = fromReason ? { ...fromReason, seq: frame.event?.seq ?? null } : null
       renderTurnBanner()
       if (reason.kind === 'error') {
         addStrip(`Turn failed: ${reason.error?.message || reason.error?.code || 'unknown error'}`)
@@ -2034,6 +2062,36 @@ function clearLive() {
  * reconnect. This banner stays until the next turn starts or the user dismisses
  * it.
  */
+/**
+ * Dismissals are keyed by kind+seq only: at raise time the page may not have a
+ * session id yet, and a session-scoped key then never matches on reload.
+ */
+const DISMISSED_ALERTS_KEY = 'rc-dismissed-alerts'
+
+function turnAlertKey(info) {
+  return (info?.kind || '') + '|' + (info?.seq ?? '')
+}
+
+function readDismissedAlerts() {
+  try { return JSON.parse(window.localStorage.getItem(DISMISSED_ALERTS_KEY) || '{}') || {} } catch { return {} }
+}
+
+function isAlertDismissed(info) {
+  return readDismissedAlerts()[turnAlertKey(info)] === true
+}
+
+function dismissAlert(info) {
+  state.turnAlert = null
+  try {
+    if (info) {
+      const map = readDismissedAlerts()
+      map[turnAlertKey(info)] = true
+      window.localStorage.setItem(DISMISSED_ALERTS_KEY, JSON.stringify(map))
+    }
+  } catch { /* storage unavailable */ }
+  renderTurnBanner()
+}
+
 function renderTurnBanner() {
   const parent = el.log?.parentElement
   if (!parent) return
@@ -2058,10 +2116,7 @@ function renderTurnBanner() {
   dismiss.className = 'turn-banner-close'
   dismiss.textContent = '×'
   dismiss.setAttribute('aria-label', 'Dismiss')
-  dismiss.addEventListener('click', () => {
-    state.turnAlert = null
-    renderTurnBanner()
-  })
+  dismiss.addEventListener('click', () => dismissAlert(info))
   node.append(text, dismiss)
 }
 
