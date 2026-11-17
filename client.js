@@ -30,6 +30,14 @@ window.__ModuleLoader__.load({
       rowButton: { cursor: 'pointer', textAlign: 'left', width: '100%' },
       rowActive: { borderColor: 'var(--dsw-alias-brand-primary)' },
       name: { fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+      statusDotRunning: {
+        width: '7px', height: '7px', borderRadius: '50%', flex: '0 0 auto',
+        background: '#3fb950', boxShadow: '0 0 0 3px rgba(63,185,80,.18)',
+      },
+      statusDotIdle: {
+        width: '7px', height: '7px', borderRadius: '50%', flex: '0 0 auto',
+        background: 'var(--dsw-alias-border-l1)',
+      },
       meta: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
       // Secondary text that must stay readable: wraps instead of truncating.
       metaWrap: {
@@ -181,6 +189,11 @@ window.__ModuleLoader__.load({
     function shortAccount(userId) {
       if (!userId) return 'signed out'
       return String(userId).slice(0, 8)
+    }
+
+    function baseName(value) {
+      const parts = String(value ?? '').split(/[\\/]/).filter(Boolean)
+      return parts[parts.length - 1] || ''
     }
 
     function relativeTime(value) {
@@ -2584,13 +2597,23 @@ window.__ModuleLoader__.load({
                       h('div', { style: { ...S.column, ...S.pane, width: '220px' } },
                       h('div', { style: S.list }, sessions.map((session) => h('div', {
                         key: session.id,
-                        style: { ...S.row, ...S.rowButton, ...(sessionId === session.id ? S.rowActive : {}) },
+                        style: { ...S.row, ...S.rowButton, alignItems: 'center', ...(sessionId === session.id ? S.rowActive : {}) },
                         onClick: () => setSessionId(session.id),
                       },
-                        h('div', { style: { minWidth: 0 } },
-                          h('div', { style: S.name }, session.title || session.cwd || session.id),
+                        h('span', {
+                          style: session.running ? S.statusDotRunning : S.statusDotIdle,
+                          title: session.running ? 'A turn is running' : 'Idle',
+                        }),
+                        h('div', { style: { minWidth: 0, flex: 1 } },
+                          h('div', { style: S.name }, session.title || (session.cwd ? baseName(session.cwd) : '') || session.id),
                           h('div', { style: S.meta },
-                            [session.running ? 'running' : '', session.blank ? 'empty' : '', relativeTime(session.updatedAt)].filter(Boolean).join(' · ')),
+                            [
+                              session.running ? 'running' : 'idle',
+                              baseName(session.cwd),
+                              session.blank ? 'empty' : '',
+                              relativeTime(session.updatedAt),
+                              typeof session.extra?.model === 'string' ? session.extra.model : '',
+                            ].filter(Boolean).join(' · ')),
                         ),
                       ))),
                       sessionPage.cursor

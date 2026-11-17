@@ -105,6 +105,14 @@ export function apply(ctx, rawConfig) {
           .map((item) => {
             const projections = item.projections?.values ?? {}
             const title = firstString(projections.title, projections.sessionTitle, projections['session-title'])
+            // A few extra projections are shown next to the session when the Host
+            // has them; unknown or structured values stay out of the list payload.
+            const extra = {}
+            for (const key of ['model', 'modelId', 'cost', 'totalCost', 'tokenUsage', 'tokens', 'status', 'lastTurnStatus']) {
+              const value = projections[key]
+              if (typeof value === 'string' && value !== '') extra[key] = value.slice(0, 40)
+              else if (typeof value === 'number' && Number.isFinite(value)) extra[key] = value
+            }
             return {
               id: item.sessionId,
               title: title || '',
@@ -112,6 +120,7 @@ export function apply(ctx, rawConfig) {
               blank: Boolean(item.blank),
               updatedAt: item.updatedAt ?? 0,
               cwd: item.cwd ?? '',
+              ...(Object.keys(extra).length > 0 ? { extra } : {}),
             }
           })
           .sort((a, b) => b.updatedAt - a.updatedAt)
