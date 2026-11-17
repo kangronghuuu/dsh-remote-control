@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import dgram from 'node:dgram'
 import http from 'node:http'
+import https from 'node:https'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { sasCode, signPayload, verifyPayload } from './identity.js'
@@ -1315,7 +1316,8 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
       ...(streamAuth ?? {}),
     }
     if (streamPair) streamHeaders['x-dsh-lane'] = 'sealed'
-    const upstream = http.request({
+    const upstreamTransport = peer.proto === 'https' ? https : http
+    const upstream = upstreamTransport.request({
       host: peer.address,
       port: peer.port,
       path: target,
@@ -1547,8 +1549,9 @@ function callRaw(peer, method, pathname, body, secret, callerId, extraHeaders, l
       headers['x-dsh-peer-ts'] = timestamp
       headers['x-dsh-peer-sig'] = sign(secret, callerId, method, pathname, timestamp, '')
     }
-    const transport = peer.proto === 'https' ? null : http
-    if (!transport) return resolve({ ok: false, error: 'tls-unsupported', json: { error: 'tls-unsupported' } })
+    // A peer announced over https (a tailnet name with a certificate) is a real
+    // direct lane, not a tunnel: speak TLS to it instead of refusing.
+    const transport = peer.proto === 'https' ? https : http
     const req = transport.request({
       host: peer.address,
       port: peer.port,
