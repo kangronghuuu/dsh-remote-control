@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "Remote Control",
-    "description": "Discover other DSH desktops on your network, approve them once, and drive their sessions from a Devices panel — plus a pairing-friendly browser page for phones."
+    "description": "Control another DSH desktop from a Devices panel: pair once, then read and drive its sessions — queue a message, steer a running turn, answer approvals and questions, and open attachments. It also serves a phone-friendly pairing page. Both Hosts must be able to reach each other (same LAN, a tailnet, or a relay).",
+    "detail": "docs/DETAIL.md"
   }
 }
