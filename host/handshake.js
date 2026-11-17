@@ -23,6 +23,10 @@ export function mintEphemeral(identity, deviceId, pairCode, keypair) {
   const publicPem = keypair.publicKey.export({ type: 'spki', format: 'pem' })
   return {
     publicPem,
+    // The signer's own nonce travels with the proof: a verifier cannot know it
+    // in advance (it is per-Host and rotates), and using its own made every
+    // post-restart rehandshake fail with bad-handshake.
+    pairCode: String(pairCode ?? ''),
     signature: signPayload(identity.ed25519.privateKey, ephemeralPayload(deviceId, pairCode, publicPem)),
   }
 }
@@ -31,9 +35,12 @@ export function verifyEphemeral(identityPublicKeyPem, deviceId, pairCode, messag
   if (!identityPublicKeyPem || !message || typeof message.publicPem !== 'string' || typeof message.signature !== 'string') {
     return false
   }
+  // Prefer the nonce carried (and signed) by the sender; fall back to the
+  // caller-supplied one for messages minted by an older version.
+  const nonce = typeof message.pairCode === 'string' ? message.pairCode : pairCode
   return verifyPayload(
     identityPublicKeyPem,
-    ephemeralPayload(deviceId, pairCode, message.publicPem),
+    ephemeralPayload(deviceId, nonce, message.publicPem),
     message.signature,
   )
 }
