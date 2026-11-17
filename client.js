@@ -78,6 +78,14 @@ window.__ModuleLoader__.load({
       userBubble: { alignSelf: 'flex-end', background: 'var(--dsw-alias-bg-layer-2)' },
       assistantBubble: { alignSelf: 'flex-start', background: 'var(--dsw-alias-bg-layer-1)' },
       toolBlock: { alignSelf: 'flex-start', maxWidth: '100%', fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' },
+      reasoningBlock: {
+        marginBottom: '6px', paddingBottom: '6px', borderBottom: '1px dashed var(--dsw-alias-border-l1)',
+        fontSize: '11px', color: 'var(--dsw-alias-label-secondary)',
+      },
+      reasoningBody: {
+        margin: '4px 0 0', maxHeight: '220px', overflow: 'auto', whiteSpace: 'pre-wrap',
+        overflowWrap: 'anywhere', fontSize: '11px', opacity: 0.9,
+      },
       toolPre: {
         margin: '4px 0 0', padding: '8px', borderRadius: '8px', maxHeight: '260px', overflow: 'auto',
         background: 'var(--dsw-alias-bg-layer-3, rgba(127,127,127,.12))',
@@ -466,6 +474,14 @@ window.__ModuleLoader__.load({
       return content
         .filter((block) => block && block.type === 'file' && block.attachment && typeof block.attachment === 'object')
         .map((block) => block.attachment)
+    }
+
+    function blocksReasoning(content) {
+      if (!Array.isArray(content)) return ''
+      return content
+        .map((block) => (block && block.type === 'reasoning' ? String(block.text ?? '') : ''))
+        .join('\n')
+        .trim()
     }
 
     function blocksImages(content) {
@@ -1244,6 +1260,12 @@ window.__ModuleLoader__.load({
       }
       if (entry.kind === 'assistant') {
         return h('div', { key: entry.key, style: { ...S.bubble, ...S.assistantBubble } },
+          entry.reasoning
+            ? h('details', { style: S.reasoningBlock },
+              h('summary', { style: { cursor: 'pointer' } }, 'Reasoning · ' + entry.reasoning.length + ' chars'),
+              h('div', { style: S.reasoningBody }, entry.reasoning),
+            )
+            : null,
           h('div', {
             className: 'rc-md',
             dangerouslySetInnerHTML: { __html: markdownHtml(entry.text) },
@@ -1320,8 +1342,10 @@ window.__ModuleLoader__.load({
           const text = blocksText(content)
           const images = blocksImages(content)
           const files = blocksFiles(content)
-          if (!text && images.length === 0 && files.length === 0) return null
-          return { key, kind: 'assistant', text, images, files }
+          // The model's thinking is a reasoning block in the same content array.
+          const reasoning = blocksReasoning(content).slice(0, 20_000)
+          if (!text && !reasoning && images.length === 0 && files.length === 0) return null
+          return { key, kind: 'assistant', text, images, files, reasoning }
         }
         case 'tool/call': {
           const name = String(data.name || 'tool')
