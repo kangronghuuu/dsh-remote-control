@@ -93,6 +93,12 @@ window.__ModuleLoader__.load({
         padding: '14px', borderRadius: '12px', background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l1)',
       },
       sheetText: { margin: 0, padding: '8px', borderRadius: '8px', fontSize: '11px', whiteSpace: 'pre-wrap', maxHeight: '52vh', overflow: 'auto', background: 'var(--dsw-alias-bg-layer-3, rgba(127,127,127,.12))' },
+      pendingRow: { display: 'flex', gap: '6px', flexWrap: 'wrap', padding: '6px 0' },
+      pendingChip: {
+        display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '999px',
+        fontSize: '11px', border: '1px solid var(--dsw-alias-border-l1)',
+      },
+      pendingRemove: { background: 'transparent', border: 0, color: 'inherit', cursor: 'pointer', padding: 0, fontSize: '12px' },
       hitlCard: {
         display: 'flex', flexDirection: 'column', gap: '6px', padding: '9px 11px', borderRadius: '10px',
         border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)',
@@ -760,6 +766,10 @@ window.__ModuleLoader__.load({
         node.scrollTo({ top: where === 'top' ? 0 : node.scrollHeight, behavior: 'smooth' })
       }
 
+      // Attachments belong to the Host that owns the session, so they are uploaded
+      // to the peer; uploading locally produced references the peer could not read.
+      const uploadBase = '/remote-control/api/peer/' + encodeURIComponent(peerId) + '/upload'
+
       const send = useCallback(async () => {
         const text = draft.trim()
         const pending = pendingFiles
@@ -770,7 +780,7 @@ window.__ModuleLoader__.load({
           const sent = []
           for (const file of pending) {
             setUploading({ name: file.name, progress: 0 })
-            const init = await api('/remote-control/api/upload/init', {
+            const init = await api(uploadBase + '/init', {
               sessionId,
               name: file.name || 'file',
               size: file.size,
@@ -783,10 +793,10 @@ window.__ModuleLoader__.load({
               const bytes = new Uint8Array(await file.slice(offset, offset + chunkSize).arrayBuffer())
               let binary = ''
               for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i])
-              await api('/remote-control/api/upload/chunk', { uploadId, index, data: btoa(binary) })
+              await api(uploadBase + '/chunk', { uploadId, index, data: btoa(binary) })
               setUploading({ name: file.name, progress: Math.min(1, (offset + chunkSize) / Math.max(1, file.size)) })
             }
-            const committed = await api('/remote-control/api/upload/commit', { uploadId })
+            const committed = await api(uploadBase + '/commit', { uploadId })
             if (committed?.attachment) sent.push(committed.attachment)
           }
           setUploading(null)
@@ -967,6 +977,17 @@ window.__ModuleLoader__.load({
           }, name)),
           h('span', { style: S.meta }, mode === 'steer' ? 'inject into the running turn' : 'wait until the turn ends'),
         ),
+        pendingFiles.length > 0
+          ? h('div', { style: S.pendingRow }, pendingFiles.map((file, position) => h('span', { key: (file.name || 'file') + position, style: S.pendingChip },
+            h('span', { style: { maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, file.name || 'file'),
+            h('button', {
+              type: 'button',
+              style: S.pendingRemove,
+              title: 'Remove',
+              onClick: () => setPendingFiles((current) => current.filter((_, index) => index !== position)),
+            }, '\u00d7'),
+          )))
+          : null,
         h('div', { style: S.composer, onDragOver: (event) => event.preventDefault(), onDrop: dropFiles },
           pendingFiles.length > 0 || uploading
             ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 6 } },

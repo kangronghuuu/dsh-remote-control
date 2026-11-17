@@ -917,7 +917,22 @@ export function apply(ctx, rawConfig) {
       return json(res, 200, await fabric.connect(String(body?.deviceId || '')))
     }
 
-      const pageMatch = action.match(/^\/peer\/([^/]+)\/(history|new-session)$/)
+      const uploadMatch = action.match(/^\/peer\/([^/]+)\/upload\/([a-z]+)$/)
+    if (uploadMatch && req.method === 'POST') {
+      const deviceId = decodeURIComponent(uploadMatch[1])
+      const step = uploadMatch[2]
+      if (!UPLOAD_ACTIONS.has(step)) return json(res, 404, { error: 'unknown-upload-action' })
+      // Chunks are base64 JSON, so the same generous cap the local route uses.
+      let body
+      try {
+        body = await readJson(req, UPLOAD_BODY_BYTES)
+      } catch (error) {
+        return json(res, 413, { error: 'body-too-large', message: error?.message || String(error) })
+      }
+      const reply = await fabric.callPeer(deviceId, 'POST', '/peer/upload/' + step, body)
+      return json(res, reply.status ?? (reply.ok ? 200 : 502), reply.json ?? { error: reply.error })
+    }
+    const pageMatch = action.match(/^\/peer\/([^/]+)\/(history|new-session)$/)
       if (pageMatch) {
         const deviceId = decodeURIComponent(pageMatch[1])
         if (pageMatch[2] === 'history' && req.method === 'GET') {
