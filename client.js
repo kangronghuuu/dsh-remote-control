@@ -211,6 +211,94 @@ window.__ModuleLoader__.load({
 
     /* ---------------- chat ---------------- */
 
+    /* ---------------- markdown ---------------- */
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+    }
+
+    function inlineMarkdown(text) {
+      let out = escapeHtml(text)
+      out = out.replace(/`([^`]+)`/g, '<code>$1</code>')
+      out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+      out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
+      out = out.replace(/~~([^~]+)~~/g, '<del>$1</del>')
+      return out
+    }
+
+    // A deliberately small subset: fenced code, headings, tables, lists, quotes,
+    // rules, bold/italic/code/links. Everything else stays literal text.
+    function markdownHtml(text) {
+      const lines = String(text ?? '').split('\n')
+      const html = []
+      let index = 0
+      while (index < lines.length) {
+        const line = lines[index]
+        const fence = /^```(.*)$/.exec(line)
+        if (fence) {
+          const body = []
+          index += 1
+          while (index < lines.length && !/^```/.test(lines[index])) { body.push(lines[index]); index += 1 }
+          index += 1
+          html.push('<pre><code>' + escapeHtml(body.join('\n')) + '</code></pre>')
+          continue
+        }
+        const heading = /^(#{1,6})\s+(.*)$/.exec(line)
+        if (heading) {
+          const level = Math.min(6, heading[1].length + 2)
+          html.push('<' + 'h' + level + '>' + inlineMarkdown(heading[2]) + '</' + 'h' + level + '>')
+          index += 1
+          continue
+        }
+        if (/^\s*(---|\*\*\*)\s*$/.test(line)) { html.push('<hr />'); index += 1; continue }
+        if (/^\s*>/.test(line)) {
+          const body = []
+          while (index < lines.length && /^\s*>/.test(lines[index])) {
+            body.push(lines[index].replace(/^\s*>\s?/, ''))
+            index += 1
+          }
+          html.push('<blockquote>' + inlineMarkdown(body.join('\n')).replace(/\n/g, '<br />') + '</blockquote>')
+          continue
+        }
+        if (/^\s*\|/.test(line) && /\s*\|\s*$/.test(line)) {
+          const rows = []
+          while (index < lines.length && /^\s*\|/.test(lines[index])) { rows.push(lines[index]); index += 1 }
+          const cells = (row) => row.replace(/^\s*\||\|\s*$/g, '').split('|').map((cell) => cell.trim())
+          const head = rows.shift()
+          if (rows.length && /^[-: |]+$/.test(rows[0])) rows.shift()
+          let table = '<table><thead><tr>' + (head ? cells(head) : []).map((cell) => '<th>' + inlineMarkdown(cell) + '</th>').join('') + '</tr></thead><tbody>'
+          for (const row of rows) table += '<tr>' + cells(row).map((cell) => '<td>' + inlineMarkdown(cell) + '</td>').join('') + '</tr>'
+          html.push(table + '</tbody></table>')
+          continue
+        }
+        if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
+          const ordered = /^\s*\d+\./.test(line)
+          const items = []
+          while (index < lines.length && /^\s*([-*+]|\d+\.)\s+/.test(lines[index])) {
+            items.push(lines[index].replace(/^\s*([-*+]|\d+\.)\s+/, ''))
+            index += 1
+          }
+          const tag = ordered ? 'ol' : 'ul'
+          html.push('<' + tag + '>' + items.map((item) => '<li>' + inlineMarkdown(item) + '</li>').join('') + '</' + tag + '>')
+          continue
+        }
+        if (line.trim() === '') { index += 1; continue }
+        const paragraph = [line]
+        index += 1
+        while (index < lines.length && lines[index].trim() !== '' && !/^\s*([-*+]|\d+\.)\s+|^\s*\||^\s*>|^```|^#{1,6}\s/.test(lines[index])) {
+          paragraph.push(lines[index])
+          index += 1
+        }
+        html.push('<p>' + paragraph.map((part) => inlineMarkdown(part)).join('<br />') + '</p>')
+      }
+      return html.join('\n')
+    }
+
     function Chat({ peerId, sessionId, title, blank, initialScrollTop, initialPinned, onScrollTop }) {
       const [entries, setEntries] = useState([])
       const [live, setLive] = useState('')
@@ -218,6 +306,26 @@ window.__ModuleLoader__.load({
       const [draft, setDraft] = useState('')
       const [pendingFiles, setPendingFiles] = useState([])
       const [uploading, setUploading] = useState(null)
+      useEffect(() => {
+        if (document.getElementById('rc-md-style')) return
+        const style = document.createElement('style')
+        style.id = 'rc-md-style'
+        style.textContent = [
+          '.rc-md { display: flex; flex-direction: column; gap: 6px; }',
+          '.rc-md p { margin: 0; }',
+          '.rc-md h3, .rc-md h4, .rc-md h5 { margin: 2px 0; font-size: 13px; }',
+          '.rc-md pre { margin: 0; padding: 8px; border-radius: 8px; overflow-x: auto; background: var(--dsw-alias-bg-layer-3, rgba(127,127,127,.12)); }',
+          '.rc-md code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }',
+          '.rc-md table { border-collapse: collapse; font-size: 12px; }',
+          '.rc-md th, .rc-md td { border: 1px solid var(--dsw-alias-border-l1); padding: 3px 7px; text-align: left; }',
+          '.rc-md blockquote { margin: 0; padding-left: 8px; border-left: 2px solid var(--dsw-alias-border-l1); opacity: .9; }',
+          '.rc-md ul, .rc-md ol { margin: 0; padding-left: 18px; }',
+          '.rc-md a { color: inherit; text-decoration: underline; }',
+          '.rc-md hr { border: 0; border-top: 1px solid var(--dsw-alias-border-l1); }',
+        ].join('\n')
+        document.head.append(style)
+      }, [])
+
       const [error, setError] = useState(null)
       const [streamState, setStreamState] = useState('connecting')
       const [attempt, setAttempt] = useState(0)
@@ -503,6 +611,17 @@ window.__ModuleLoader__.load({
             value: draft,
             placeholder: 'Message this device…',
             onChange: (event) => setDraft(event.target.value),
+            onPaste: (event) => {
+              const files = []
+              for (const item of event.clipboardData?.items ?? []) {
+                if (item.kind !== 'file') continue
+                const file = item.getAsFile()
+                if (file) files.push(file)
+              }
+              if (files.length === 0) return
+              event.preventDefault()
+              addFiles(files)
+            },
             onKeyDown: (event) => {
               if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send() }
             },
@@ -529,7 +648,12 @@ window.__ModuleLoader__.load({
 
     function renderEntry(entry) {
       if (entry.kind === 'user') return h('div', { key: entry.key, style: { ...S.bubble, ...S.userBubble } }, entry.text)
-      if (entry.kind === 'assistant') return h('div', { key: entry.key, style: { ...S.bubble, ...S.assistantBubble } }, entry.text)
+      if (entry.kind === 'assistant') return h('div', {
+        key: entry.key,
+        style: { ...S.bubble, ...S.assistantBubble },
+        className: 'rc-md',
+        dangerouslySetInnerHTML: { __html: markdownHtml(entry.text) },
+      })
       if (entry.kind === 'tool') return h('div', { key: entry.key, style: S.toolRow }, `⚙ ${entry.text}`)
       return h('div', { key: entry.key, style: S.note }, entry.text)
     }
@@ -989,7 +1113,21 @@ window.__ModuleLoader__.load({
             title: sidebarOpen ? 'Hide the device and session list' : 'Show the device and session list',
             'aria-pressed': sidebarOpen,
             onClick: () => setSidebarOpen((value) => !value),
-          }, sidebarOpen ? '\u25E7' : '\u25E8'),
+          }, h('svg', {
+            width: 16,
+            height: 16,
+            viewBox: '0 0 24 24',
+            fill: 'none',
+            stroke: 'currentColor',
+            strokeWidth: 1.6,
+            'aria-hidden': true,
+          },
+            h('rect', { x: 3, y: 4, width: 18, height: 16, rx: 2 }),
+            h('line', { x1: 15, y1: 4, x2: 15, y2: 20 }),
+            sidebarOpen
+              ? h('rect', { x: 15, y: 4, width: 6, height: 16, fill: 'currentColor', stroke: 'none', opacity: 0.35 })
+              : null,
+          )),
           h('div', { style: { display: 'flex', gap: '4px', padding: '2px', borderRadius: '8px', border: '1px solid var(--dsw-alias-line, #444)' } },
             ...['chat', 'settings'].map((name) => h('button', {
               key: name,
