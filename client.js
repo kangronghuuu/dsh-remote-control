@@ -5,6 +5,10 @@ window.__ModuleLoader__.load({
     const h = React.createElement
     const { useCallback, useEffect, useMemo, useRef, useState } = React
 
+    /** Build marker: a cached bundle is the difference between fixed and broken. */
+    const CLIENT_VERSION = '0.7.58'
+    try { window.__DSH_RC_CLIENT_VERSION__ = CLIENT_VERSION } catch { /* not a browser */ }
+
     const S = {
       chevron: { fontSize: '11px', lineHeight: 1, opacity: 0.75 },
       page: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, minWidth: 0, overflow: 'hidden', color: 'var(--dsw-alias-label-primary)' },
@@ -502,7 +506,9 @@ window.__ModuleLoader__.load({
      */
     function PathImage({ peerId, sessionId, filePath }) {
       const [src, setSrc] = useState('')
+      const usable = looksLikePath(filePath)
       useEffect(() => {
+        if (!usable) return undefined
         let alive = true
         const url = '/remote-control/api/peer/' + encodeURIComponent(peerId) + '/file?sessionId=' + encodeURIComponent(sessionId) + '&path=' + encodeURIComponent(filePath) + '&raw=1'
         api(url).then((value) => {
@@ -510,8 +516,9 @@ window.__ModuleLoader__.load({
           setSrc('data:' + (value.mediaType || 'image/png') + ';base64,' + value.data)
         }).catch(() => {})
         return () => { alive = false }
-      }, [peerId, sessionId, filePath])
-      if (!src) return h('span', { style: S.meta }, '\ud83d\uddbc ' + filePath.split('/').pop())
+      }, [peerId, sessionId, filePath, usable])
+      if (!usable) return h('span', { style: S.meta }, String(filePath || 'file'))
+      if (!src) return h('span', { style: S.meta }, '\ud83d\uddbc ' + String(filePath).split(/[\\/]/).pop())
       return h('img', {
         src,
         alt: filePath,
@@ -583,7 +590,8 @@ window.__ModuleLoader__.load({
       const [state, setState] = useState({ status: 'loading', text: '', dataUrl: '', mediaType: '', size: 0 })
       useEffect(() => {
         let alive = true
-        if (!filePath || !peerId) {
+        if (!filePath || !peerId || !looksLikePath(filePath)) {
+          // An attachment's display name is not a path; reading it would 404.
           setState({ status: 'error', text: '', dataUrl: '', mediaType: '', size: 0 })
           return undefined
         }
@@ -1569,12 +1577,12 @@ window.__ModuleLoader__.load({
               attachment: ref,
             })))
             : null,
-          entry.files?.length
-            ? h('div', { style: S.imageRow }, entry.files.map((ref, position) => h('button', {
+          visuals.rest.length
+            ? h('div', { style: S.imageRow }, visuals.rest.map((ref, position) => h('button', {
               key: (ref.attachmentId || '') + position,
               type: 'button',
               style: S.fileChip,
-              onClick: () => context.onOpenFile?.(ref),
+              onClick: () => context.onOpenFile?.(refPath(ref)),
             }, '\ud83d\udcc4 ' + (ref.name || 'file'))))
             : null,
 
@@ -2228,6 +2236,7 @@ window.__ModuleLoader__.load({
           ? h(SetupWizard, { busy, error, onChoose: setupChoice, onSkip: () => setWizardSkipped(true) })
           : null,
         h('div', { style: S.header },
+          h('span', { style: { ...S.meta, opacity: 0.55 }, title: 'Remote control client build' }, 'v' + CLIENT_VERSION),
           h('div', null,
             h('h2', { style: S.title }, 'Devices'),
             h('div', { style: S.subtitle },
