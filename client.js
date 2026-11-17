@@ -6,6 +6,7 @@ window.__ModuleLoader__.load({
     const { useCallback, useEffect, useMemo, useRef, useState } = React
 
     const S = {
+      chevron: { fontSize: '11px', lineHeight: 1, opacity: 0.75 },
       page: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, color: 'var(--dsw-alias-label-primary)' },
       header: {
         display: 'flex', alignItems: 'center', gap: '10px', padding: '14px 18px',
@@ -570,6 +571,43 @@ window.__ModuleLoader__.load({
 
     /* ---------------- devices page ---------------- */
 
+    /**
+     * A section that folds down to one summary line. The open state is kept per
+     * browser so the page opens the way the user left it.
+     */
+    function Collapsible({ title, summary, storageKey, defaultOpen = false, children }) {
+      const [open, setOpen] = useState(() => {
+        try {
+          const saved = window.localStorage.getItem('dsh-remote-control:section:' + storageKey)
+          return saved === null ? defaultOpen : saved === '1'
+        } catch { return defaultOpen }
+      })
+      const toggle = () => {
+        setOpen((value) => {
+          const next = !value
+          try { window.localStorage.setItem('dsh-remote-control:section:' + storageKey, next ? '1' : '0') } catch { /* ignore */ }
+          return next
+        })
+      }
+      return h('div', { style: { ...S.notice, display: 'flex', flexDirection: 'column', gap: open ? '12px' : '0px' } },
+        h('div', {
+          role: 'button',
+          tabIndex: 0,
+          'aria-expanded': open,
+          onClick: toggle,
+          onKeyDown: (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle() } },
+          style: { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', minHeight: '22px' },
+        },
+          h('span', { style: S.chevron }, open ? '\u25BE' : '\u25B8'),
+          h('span', { style: { fontWeight: 600 } }, title),
+          summary ? h('span', { style: { ...S.meta, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, summary) : null,
+          h('div', { style: { flex: 1 } }),
+          h('span', { style: S.meta }, open ? 'hide' : 'show'),
+        ),
+        open ? children : null,
+      )
+    }
+
     function DevicesPage() {
       const [state, setState] = useState(null)
       const [error, setError] = useState(null)
@@ -937,7 +975,8 @@ window.__ModuleLoader__.load({
           )
           : null,
         state?.service
-          ? h('div', { style: { ...S.notice, display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
+          ? h(Collapsible, { title: 'Service', summary: 'tunnel / LAN reachability', storageKey: 'service', defaultOpen: true },
+              h('div', { style: { ...S.notice, display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
             h('span', { style: { fontWeight: 600 } }, 'Service'),
             h('span', { style: { ...S.chip, ...(state.service.healthy ? S.chipOk : S.chipWarn) } }, state.service.healthy ? 'healthy' : 'unhealthy'),
             h('span', { style: S.meta }, state.service.provider + (state.service.since ? ' · up ' + uptimeText(state.service.since) : '')),
@@ -960,10 +999,12 @@ window.__ModuleLoader__.load({
                 style: { width: '84px', height: '84px', background: '#fff', borderRadius: '8px', padding: '4px' },
               })
               : null,
-          )
+          ),
+            )
           : null,
         state?.pairing?.code
-          ? h('div', { style: { ...S.notice, display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' } },
+          ? h(Collapsible, { title: 'Pairing', summary: 'code and QR for a new phone', storageKey: 'pairing', defaultOpen: false },
+              h('div', { style: { ...S.notice, display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' } },
             h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '240px' } },
               h('span', { style: S.meta }, 'Pairing code — enter it on the phone, or scan the code to pair automatically'),
               h('span', {
@@ -994,10 +1035,12 @@ window.__ModuleLoader__.load({
                 }, pairScan),
               )
               : null,
-          )
+          ),
+            )
           : null,
         notify
-          ? h('div', { style: { ...S.notice, display: 'flex', flexDirection: 'column', gap: '10px' } },
+          ? h(Collapsible, { title: 'Notifications', summary: 'approval / question delivery', storageKey: 'notifications', defaultOpen: false },
+              h('div', { style: { ...S.notice, display: 'flex', flexDirection: 'column', gap: '10px' } },
             h('div', { style: { display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' } },
               h('span', { style: { fontWeight: 600 } }, 'Notifications'),
               h('span', { style: S.meta }, 'approval / question reach you out of band — credentials stay in this Host'),
@@ -1020,7 +1063,8 @@ window.__ModuleLoader__.load({
                 ? h('span', { style: { ...S.meta, color: notifyStatus.bad ? '#ff8c8c' : '#7ee08b' } }, notifyStatus.text)
                 : null,
             ),
-          )
+          ),
+            )
           : null,
         error ? h('div', { style: S.error }, error) : null,
 
