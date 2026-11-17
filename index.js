@@ -351,6 +351,11 @@ export function apply(ctx, rawConfig) {
     ctx.effect(() => () => { try { serviceManager.stop() } catch { /* ignore */ } })
   }
 
+  // A seeded peer is pruned once PEER_TTL_MS passes without a fresh announce, so
+  // the tailnet discovery has to keep refreshing it. Identities are cached per
+  // name to avoid probing the same host every tick.
+  const tailnetIdentities = new Map()
+
   /**
    * Tailnet discovery: UDP broadcast cannot cross subnets, but the tailnet hands
    * every device a stable name. Ask each online peer whether it hosts this
@@ -365,6 +370,14 @@ export function apply(ctx, rawConfig) {
     const worker = async () => {
       while (queue.length > 0) {
         const peer = queue.shift()
+        const cached = tailnetIdentities.get(peer.dnsName)
+        if (cached) {
+          if (cached !== self.deviceId) {
+            fabric.simulateAnnounce(cached, peer.dnsName, 443, 'https')
+            found += 1
+          }
+          continue
+        }
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), 4000)
         try {
@@ -373,6 +386,7 @@ export function apply(ctx, rawConfig) {
           const identity = await response.json()
           if (identity?.service !== 'dsh-remote-control') continue
           if (typeof identity.deviceId !== 'string' || identity.deviceId === '' || identity.deviceId === self.deviceId) continue
+          tailnetIdentities.set(peer.dnsName, identity.deviceId)
           // port 443 over https: the tailnet serves the listener behind TLS.
           fabric.simulateAnnounce(identity.deviceId, peer.dnsName, 443, 'https')
           found += 1
@@ -404,11 +418,15 @@ export function apply(ctx, rawConfig) {
         }
         log.info?.(`[remote-control] tailnet detected: ${tailnet.dnsName} (${tailnetAddress})`)
       }
-      // Retry a couple of times: fabric comes up a moment after the Host does.
-      for (const delay of [2500, 9000, 30000]) {
-        const timer = setTimeout(() => { void discoverTailnetPeers().catch(() => {}) }, delay)
+      // Keep refreshing: a seeded peer is dropped after PEER_TTL_MS without an
+      // announce, and cached identities make later ticks cost nothing.
+      const tick = async () => {
+        await discoverTailnetPeers().catch(() => {})
+        const timer = setTimeout(tick, 8000)
         timer.unref?.()
       }
+      const firstTick = setTimeout(tick, 2500)
+      firstTick.unref?.()
       deviceIdentity = await loadOrCreateIdentity(
         identityFile,
         log,
