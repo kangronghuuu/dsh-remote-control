@@ -33,6 +33,12 @@ window.__ModuleLoader__.load({
         whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', minWidth: 0,
       },
       // A chat title shrinks with the panel instead of widening it.
+      runChip: {
+        display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11px',
+        color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap', flex: '0 0 auto',
+      },
+      runChipOn: { color: 'var(--dsw-alias-state-success-primary)' },
+      runDot: { width: '7px', height: '7px', borderRadius: '50%', background: 'currentColor', opacity: 0.5 },
       chatTitle: {
         fontSize: '13px', fontWeight: 600, flex: 1, minWidth: 0,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -991,6 +997,13 @@ window.__ModuleLoader__.load({
           },
         },
           h('span', { style: S.chatTitle, title: title || sessionId }, title || sessionId),
+          h('span', {
+            style: { ...S.runChip, ...(running ? S.runChipOn : {}) },
+            title: running ? 'A turn is running on the peer' : 'No turn is running',
+          },
+            h('span', { style: { ...S.runDot, ...(running ? { background: 'currentColor' } : {}) } }),
+            running ? 'running' : 'idle',
+          ),
         ),
         h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', minWidth: 0 } },
           h('button', { type: 'button', style: S.smallButton, title: 'Scroll to top', onClick: () => scrollJump('top') }, '\u2191'),
@@ -1386,6 +1399,8 @@ window.__ModuleLoader__.load({
       const [openPeer, setOpenPeer] = useState(null)
       const [sessions, setSessions] = useState(null)
       const [sessionId, setSessionId] = useState(null)
+      // Sessions are paged: a Host can own thousands of them.
+      const [sessionPage, setSessionPage] = useState({ cursor: null, total: 0, loading: false })
       const [notice, setNotice] = useState(null)
       const [wizardSkipped, setWizardSkipped] = useState(false)
       const [notify, setNotify] = useState(null)
@@ -1550,23 +1565,48 @@ window.__ModuleLoader__.load({
         refresh()
       }, [refresh])
 
+      const SESSION_PAGE_SIZE = 30
+      const fetchSessions = useCallback(async (peerId, cursor) => {
+        const query = '?limit=' + SESSION_PAGE_SIZE + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '')
+        const value = await api('/remote-control/api/peer/' + encodeURIComponent(peerId) + '/sessions' + query)
+        return {
+          items: (value.items || []).slice().sort(
+            (a, b) => Number(Boolean(a.blank)) - Number(Boolean(b.blank)) || (b.updatedAt || 0) - (a.updatedAt || 0),
+          ),
+          total: Number(value.total) || 0,
+          cursor: value.nextCursor ?? null,
+        }
+      }, [])
+
       const open = useCallback(async (peer) => {
         setOpenPeer(peer)
         setSessions(null)
         setSessionId(null)
+        setSessionPage({ cursor: null, total: 0, loading: false })
         try {
-          const value = await api(`/remote-control/api/peer/${encodeURIComponent(peer.deviceId)}/sessions`)
-          const items = (value.items || []).slice().sort(
-            (a, b) => Number(Boolean(a.blank)) - Number(Boolean(b.blank)) || (b.updatedAt || 0) - (a.updatedAt || 0),
-          )
-          setSessions(items)
-          return items
+          const page = await fetchSessions(peer.deviceId, null)
+          setSessions(page.items)
+          setSessionPage({ cursor: page.cursor, total: page.total, loading: false })
+          return page.items
         } catch (failure) {
           setError(failure.message)
           setSessions([])
           return []
         }
-      }, [])
+      }, [fetchSessions])
+
+      const loadMoreSessions = useCallback(async () => {
+        if (!openPeer || !sessionPage.cursor || sessionPage.loading) return
+        setSessionPage((value) => ({ ...value, loading: true }))
+        try {
+          const page = await fetchSessions(openPeer.deviceId, sessionPage.cursor)
+          setSessions((current) => current.concat(page.items))
+          setSessionPage({ cursor: page.cursor, total: page.total, loading: false })
+        } catch (failure) {
+          setError(failure.message)
+          setSessionPage((value) => ({ ...value, loading: false }))
+        }
+      }, [openPeer, sessionPage.cursor, sessionPage.loading, fetchSessions])
 
       // Restore the last peer/session (or a deep link) once both are known.
       useEffect(() => {
@@ -2096,9 +2136,9 @@ window.__ModuleLoader__.load({
                     h('div', { style: sidebarOpen ? { display: 'flex', flexDirection: 'column', minHeight: 0 } : { display: 'none' } },
               h(Collapsible, {
                       title: 'Sessions',
-                      summary: sessionId
+                      summary: (sessionId
                         ? (sessions.find((session) => session.id === sessionId)?.title || sessionId)
-                        : 'pick a session',
+                        : 'pick a session') + (sessionPage.total > sessions.length ? ' · ' + sessions.length + '/' + sessionPage.total : ''),
                       storageKey: 'picker:sessions',
                       defaultOpen: true,
                       forceClose: sessionId ? 1 : 0,
@@ -2115,6 +2155,14 @@ window.__ModuleLoader__.load({
                             [session.running ? 'running' : '', session.blank ? 'empty' : '', relativeTime(session.updatedAt)].filter(Boolean).join(' · ')),
                         ),
                       ))),
+                      sessionPage.cursor
+                        ? h('button', {
+                          type: 'button',
+                          style: { ...S.smallButton, margin: '6px 10px' },
+                          disabled: sessionPage.loading,
+                          onClick: loadMoreSessions,
+                        }, sessionPage.loading ? 'Loading\u2026' : 'Load more (' + sessions.length + '/' + sessionPage.total + ')')
+                        : null,
                     ),
                     ),
             ),

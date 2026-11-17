@@ -95,6 +95,27 @@ export function apply(ctx, rawConfig) {
   const sessionsListCache = { at: 0, items: [] }
 
   const sessions = {
+    /**
+     * One page of the session list. The full list is cached; paging keeps both
+     * the payload and the render bounded as the history grows.
+     */
+    async page(options) {
+      const limit = Math.min(100, Math.max(1, Number(options?.limit) || 40))
+      const offset = Math.max(0, Number(options?.cursor) || 0)
+      let items
+      try {
+        items = await this.list()
+      } catch {
+        items = []
+      }
+      const slice = items.slice(offset, offset + limit)
+      const nextOffset = offset + slice.length
+      return {
+        items: slice,
+        total: items.length,
+        nextCursor: nextOffset < items.length ? String(nextOffset) : null,
+      }
+    },
     async list() {
       const now = Date.now()
       if (now - sessionsListCache.at < 2500) return sessionsListCache.items
@@ -1050,7 +1071,9 @@ export function apply(ctx, rawConfig) {
         return json(res, reply.status ?? (reply.ok ? 200 : 502), reply.json ?? { error: reply.error })
       }
       if (operation === 'sessions' && req.method === 'GET') {
-        const reply = await fabric.callPeer(deviceId, 'GET', '/peer/sessions', undefined, { race: true })
+        const limit = String(url.searchParams.get('limit') || '')
+        const cursor = String(url.searchParams.get('cursor') || '')
+        const reply = await fabric.callPeer(deviceId, 'GET', '/peer/sessions?limit=' + encodeURIComponent(limit) + '&cursor=' + encodeURIComponent(cursor), undefined, { race: true })
         return json(res, reply.status ?? (reply.ok ? 200 : 502), reply.json ?? { error: reply.error })
       }
       if (operation === 'stream' && req.method === 'GET') {
@@ -1211,7 +1234,7 @@ export function apply(ctx, rawConfig) {
 
     if (pathname === '/api/sessions' && req.method === 'GET') {
       if (!ctx.sessionController) return json(res, 503, { error: 'session-controller-unavailable' })
-      return listSessions(res)
+      return listSessions(res, url)
     }
 
     if (pathname === '/api/state' && req.method === 'GET') {
@@ -1510,9 +1533,11 @@ export function apply(ctx, rawConfig) {
     return json(res, 200, { ok: true })
   }
 
-  async function listSessions(res) {
-    const items = await sessions.list()
-    return json(res, 200, { items })
+  async function listSessions(res, url) {
+    const limit = String(url?.searchParams?.get('limit') || '')
+    const cursor = String(url?.searchParams?.get('cursor') || '')
+    const page = await sessions.page({ limit, cursor })
+    return json(res, 200, { items: page.items, total: page.total, nextCursor: page.nextCursor })
   }
 
   async function streamSession(req, res, url) {

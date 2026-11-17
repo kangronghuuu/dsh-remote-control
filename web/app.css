@@ -172,6 +172,25 @@ button {
   border: 1px solid var(--line);
 }
 
+.run-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.run-status i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.run-status[data-state="running"] { color: var(--ok, #3fb950); }
+.run-status[data-state="running"] i { background: currentColor; animation: run-pulse 1.2s ease-in-out infinite; }
+@keyframes run-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.8); } }
+
 .status {
   display: inline-flex;
   align-items: center;

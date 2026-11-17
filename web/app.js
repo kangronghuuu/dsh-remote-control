@@ -35,6 +35,7 @@ const el = {
   meta: $('session-meta'),
   turnNav: $('turn-nav'),
   status: $('status'),
+  runStatus: $('run-status'),
   log: $('log'),
   empty: $('empty'),
   loadEarlier: $('load-earlier'),
@@ -268,9 +269,15 @@ function isTouch() {
 
 /* ---------------- sessions ---------------- */
 
+const SESSION_PAGE_SIZE = 30
+
 async function loadSessions() {
-  const value = await request('/api/sessions')
+  state.sessionsCursor = null
+  state.sessionsTotal = 0
+  const value = await request('/api/sessions?limit=' + SESSION_PAGE_SIZE)
   state.sessions = Array.isArray(value.items) ? value.items : []
+  state.sessionsCursor = value.nextCursor ?? null
+  state.sessionsTotal = Number(value.total) || state.sessions.length
   renderSessions()
   const wanted = state.sessionId || savedSessionId()
   if (wanted && state.sessions.some((session) => session.id === wanted)) {
@@ -326,6 +333,28 @@ function renderSessions() {
       closeDrawer()
     })
     el.sessionList.append(button)
+  }
+
+  if (state.sessionsCursor) {
+    const more = document.createElement('button')
+    more.type = 'button'
+    more.className = 'session-item'
+    more.textContent = 'Load more (' + state.sessions.length + '/' + state.sessionsTotal + ')'
+    more.addEventListener('click', async () => {
+      more.disabled = true
+      more.textContent = 'Loading…'
+      try {
+        const value = await request('/api/sessions?limit=' + SESSION_PAGE_SIZE + '&cursor=' + encodeURIComponent(state.sessionsCursor))
+        state.sessions = state.sessions.concat(Array.isArray(value.items) ? value.items : [])
+        state.sessionsCursor = value.nextCursor ?? null
+        state.sessionsTotal = Number(value.total) || state.sessions.length
+        renderSessions()
+      } catch (error) {
+        more.disabled = false
+        more.textContent = 'Load more failed — retry'
+      }
+    })
+    el.sessionList.append(more)
   }
 }
 
@@ -423,10 +452,43 @@ function selectSession(id) {
   updateScrollJump()
 }
 
+/**
+ * The header reports the session state: a turn in flight, or waiting. The stream
+ * chip next to it only says whether the live connection is up.
+ */
+function renderRunStatus() {
+  if (!el.runStatus) return
+  if (!state.sessionId) {
+    el.runStatus.hidden = true
+    return
+  }
+  el.runStatus.hidden = false
+  const running = state.running === true
+  el.runStatus.dataset.state = running ? 'running' : 'idle'
+  const label = el.runStatus.lastElementChild
+  if (label) {
+    if (running) {
+      const seconds = state.turnStartedAt ? Math.max(0, Math.round((Date.now() - state.turnStartedAt) / 1000)) : 0
+      label.textContent = 'running · ' + formatDuration(seconds)
+    } else {
+      label.textContent = 'idle'
+    }
+  }
+}
+
+function formatDuration(seconds) {
+  if (seconds < 60) return seconds + 's'
+  const minutes = Math.floor(seconds / 60)
+  const rest = seconds % 60
+  if (minutes < 60) return minutes + 'm' + (rest ? ' ' + rest + 's' : '')
+  return Math.floor(minutes / 60) + 'h ' + (minutes % 60) + 'm'
+}
+
 function updateMeta() {
   const session = state.sessions.find((entry) => entry.id === state.sessionId)
   el.title.textContent = session ? titleOf(session) : 'No session'
   el.meta.textContent = session ? subtitleOf(session) : ''
+  renderRunStatus()
 }
 
 /* ---------------- stream ---------------- */
@@ -1890,8 +1952,13 @@ function clearLive() {
 
 /* ---------------- actions ---------------- */
 
+setInterval(() => { if (state.running) renderRunStatus() }, 1000)
+
+
 function setRunning(value) {
   state.running = value
+  if (value) state.turnStartedAt = Date.now()
+  renderRunStatus()
   el.stop.hidden = !value
   el.send.disabled = false
   // The delivery mode only matters while a turn is open: the next message is

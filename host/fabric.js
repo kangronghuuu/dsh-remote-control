@@ -988,8 +988,16 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
       return reply(200, await sessions.applyConfig(sessionId, body))
     }
     if (pathname === '/peer/sessions' && req.method === 'GET') {
+      // Paged: a Host can own thousands of sessions, and the peer renders a list.
+      if (typeof sessions.page === 'function') {
+        const page = await sessions.page({
+          limit: url.searchParams.get('limit'),
+          cursor: url.searchParams.get('cursor'),
+        })
+        return reply(200, { items: page.items, total: page.total, nextCursor: page.nextCursor })
+      }
       const value = await sessions.list()
-      return reply(200, { items: value.map((item) => ({ ...item, title: item.title })) })
+      return reply(200, { items: value.map((item) => ({ ...item, title: item.title })), total: value.length, nextCursor: null })
     }
     if (pathname === '/peer/stream' && req.method === 'GET') {
       return streamSession(req, res, url)
