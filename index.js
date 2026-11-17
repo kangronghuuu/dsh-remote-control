@@ -216,11 +216,18 @@ export function apply(ctx, rawConfig) {
       const requested = typeof input === 'object' && Array.isArray(input?.attachments) ? input.attachments : []
       const parts = []
       if (text.trim()) parts.push({ type: 'text', text })
-      for (const item of requested) {
-        if (!item || typeof item !== 'object') continue
-        if (item.type === 'image' || item.type === 'file') {
-          if (item.attachment && typeof item.attachment === 'object') parts.push({ type: item.type, attachment: item.attachment })
-        }
+      for (const entry of requested) {
+        if (!entry || typeof entry !== 'object') continue
+        // Accept both shapes: { type, attachment } (DSH and the phone page) and a
+        // bare attachment reference (older clients), inferring the kind from the
+        // media type so nothing is dropped silently.
+        const attachment = entry.attachment && typeof entry.attachment === 'object' ? entry.attachment : entry
+        const hasId = typeof attachment.attachmentId === 'string' && attachment.attachmentId !== ''
+        if (!hasId) continue
+        const kind = entry.type === 'image' || entry.type === 'file'
+          ? entry.type
+          : String(attachment.mediaType || '').startsWith('image/') ? 'image' : 'file'
+        parts.push({ type: kind, attachment })
       }
       if (parts.length === 0) throw new Error('empty prompt')
       // Admit through the attachment service so encoded images are normalized

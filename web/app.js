@@ -1834,6 +1834,24 @@ function renderQueue(items) {
       row.append(steer)
     }
 
+    const edit = document.createElement('button')
+    edit.type = 'button'
+    edit.className = 'queue-action'
+    edit.setAttribute('aria-label', 'Edit queued message')
+    edit.textContent = 'Edit'
+    edit.addEventListener('click', async () => {
+      // Editing takes the message back: remove it from the queue and put the text
+      // into the composer so it can be changed and sent again.
+      if (item.text) {
+        el.input.value = item.text
+        el.input.dispatchEvent(new Event('input'))
+        autosize()
+        el.input.focus()
+      }
+      await queueAction(item.id, 'remove')
+    })
+    row.append(edit)
+
     const remove = document.createElement('button')
     remove.type = 'button'
     remove.className = 'queue-action'

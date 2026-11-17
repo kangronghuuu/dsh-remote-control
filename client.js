@@ -692,6 +692,7 @@ window.__ModuleLoader__.load({
       const [configBusy, setConfigBusy] = useState(false)
       const seen = useRef(new Set())
       const chatRoot = useRef(null)
+      const inputRef = useRef(null)
       const logRef = useRef(null)
       // Turn boundaries, so the transcript can be navigated turn by turn.
       const turnMark = useRef({ pending: false, count: 0 })
@@ -969,6 +970,14 @@ window.__ModuleLoader__.load({
         const timer = setInterval(refreshQueue, 2500)
         return () => clearInterval(timer)
       }, [refreshQueue])
+      const editQueued = async (item) => {
+        // Editing means "take it back and change it": remove the queued item and
+        // load its text into the composer.
+        setDraft(String(item.text ?? ''))
+        await queueAction(item, 'remove')
+        requestAnimationFrame(() => inputRef.current?.focus())
+      }
+
       const queueAction = async (item, kind) => {
         try {
           await api('/remote-control/api/peer/' + encodeURIComponent(peerId) + '/queue', { sessionId, itemId: item.id, kind })
@@ -1034,7 +1043,12 @@ window.__ModuleLoader__.load({
               setUploading({ name: file.name, progress: Math.min(1, (offset + chunkSize) / Math.max(1, file.size)) })
             }
             const committed = await api(uploadBase + '/commit', { uploadId })
-            if (committed?.attachment) sent.push(committed.attachment)
+            if (committed?.attachment) {
+              // The Host builds prompt content blocks from { type, attachment },
+              // which is the same shape DSH's own paste produces. A bare ref was
+              // silently dropped, which is why pasted images never arrived.
+              sent.push({ type: committed.kind === 'image' ? 'image' : 'file', attachment: committed.attachment })
+            }
           }
           setUploading(null)
           setPendingFiles([])
@@ -1234,6 +1248,7 @@ window.__ModuleLoader__.load({
         queue.length > 0
           ? h('div', { style: S.queueList }, queue.map((item) => h('div', { key: item.id, style: S.queueRow },
             h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, item.text || '(attachment)'),
+            h('button', { type: 'button', style: S.queueButton, onClick: () => editQueued(item) }, 'Edit'),
             h('button', { type: 'button', style: S.queueButton, onClick: () => queueAction(item, 'steer') }, 'Steer'),
             h('button', { type: 'button', style: S.queueButton, onClick: () => queueAction(item, 'remove') }, '×'),
           )))
@@ -1288,6 +1303,7 @@ window.__ModuleLoader__.load({
               )
             : null,
           h('textarea', {
+            ref: inputRef,
             style: S.input,
             rows: 1,
             value: draft,
@@ -1664,6 +1680,9 @@ window.__ModuleLoader__.load({
       // Persist the selection (and scroll position) per browser and Host.
       useEffect(() => {
         if (!openPeer) return
+        // While the restore is running, sessionId is briefly null; writing that
+        // would erase the very selection we are restoring.
+        if (!restoredTarget.current && savedTarget.current?.sessionId && !sessionId) return
         const value = {
           peerId: openPeer.deviceId,
           sessionId: sessionId ?? null,
@@ -1846,7 +1865,9 @@ window.__ModuleLoader__.load({
                 return
               }
             } catch { /* fall through to the notice */ }
-            setNotice('The saved session is no longer available on that device. Pick another one.')
+            const listed = items.slice(0, 3).map((item) => item.id).join(', ')
+            setNotice('Saved session ' + target.sessionId + ' was not offered by the peer (' + items.length + ' listed: ' + listed + '). Pick another one.')
+            console.warn('[remote-control] restore missed', { wanted: target.sessionId, peer: peer.deviceId, listed: items.map((item) => item.id) })
           }
         })()
       }, [state, open])
