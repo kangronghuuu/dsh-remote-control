@@ -285,10 +285,24 @@ window.__ModuleLoader__.load({
 
     function inlineMarkdown(text) {
       let out = escapeHtml(text)
-      out = out.replace(/`([^`]+)`/g, '<code>$1</code>')
+      out = out.replace(/\`([^\`]+)\`/g, (whole, value) => {
+        if (/^[a-z]+:/i.test(value) || value.includes(' ')) return '<code>' + value + '</code>'
+        if (/\.\w{1,8}$/.test(value) && (value.includes('/') || value.startsWith('.'))) {
+          return '<button type="button" class="rc-file" data-path="' + escapeHtml(value) + '">' + value + '</button>'
+        }
+        return '<code>' + value + '</code>'
+      })
       out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
       out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
-      out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
+      out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (whole, label, target) => {
+        if (/^https?:\/\//i.test(target)) return '<a href="' + target + '" target="_blank" rel="noreferrer">' + label + '</a>'
+        if (/^[a-z]+:/i.test(target)) return '<a href="' + target + '">' + label + '</a>'
+        // A relative path is meaningful to the Host, not to the browser.
+        if (/\.\w{1,8}$/.test(target) && (target.includes('/') || target.startsWith('.'))) {
+          return '<button type="button" class="rc-file" data-path="' + escapeHtml(target) + '">' + label + '</button>'
+        }
+        return label
+      })
       out = out.replace(/~~([^~]+)~~/g, '<del>$1</del>')
       return out
     }
@@ -477,6 +491,34 @@ window.__ModuleLoader__.load({
      * A non-image attachment: text opens inline, anything else downloads. The
      * bytes come over the peer channel like images do.
      */
+    /** A file path on the peer: read it through the Host and show the text. */
+    function PathSheet({ peerId, sessionId, filePath, onClose }) {
+      const [state, setState] = useState({ status: 'loading', text: '', size: 0 })
+      useEffect(() => {
+        let alive = true
+        const url = '/remote-control/api/peer/' + encodeURIComponent(peerId) + '/file?sessionId=' + encodeURIComponent(sessionId) + '&path=' + encodeURIComponent(filePath)
+        api(url).then((value) => {
+          if (!alive) return
+          if (value?.text === undefined) setState({ status: 'error', text: '', size: 0 })
+          else setState({ status: 'text', text: String(value.text), size: Number(value.size) || 0 })
+        }).catch(() => { if (alive) setState({ status: 'error', text: '', size: 0 }) })
+        return () => { alive = false }
+      }, [peerId, sessionId, filePath])
+      return h('div', { style: S.sheet, onClick: (event) => { if (event.target === event.currentTarget) onClose() } },
+        h('div', { style: S.sheetCard },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+            h('strong', { style: { flex: 1, fontSize: '13px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, filePath),
+            h('button', { type: 'button', style: S.button, onClick: onClose }, 'Close'),
+          ),
+          state.status === 'loading' ? h('div', { style: S.meta }, 'Loading\u2026') : null,
+          state.status === 'error' ? h('div', { style: S.meta }, 'Could not read this file.') : null,
+          state.status === 'text'
+            ? h('pre', { style: S.sheetText }, state.text || '(empty file)')
+            : null,
+        ),
+      )
+    }
+
     function FileSheet({ peerId, ref, onClose }) {
       const [state, setState] = useState({ status: 'loading', text: '', dataUrl: '' })
       useEffect(() => {
@@ -565,6 +607,7 @@ window.__ModuleLoader__.load({
           '.rc-md a { color: inherit; text-decoration: underline; }',
           '.rc-md hr { border: 0; border-top: 1px solid var(--dsw-alias-border-l1); }',
           '.rc-d-add { color: #6fe08b; }',
+          '.rc-file { font: inherit; font-size: 0.92em; padding: 0 4px; border-radius: 5px; border: 1px solid var(--dsw-alias-border-l1); background: rgba(127,127,127,.12); color: inherit; cursor: pointer; }',
           '.rc-d-del { color: #ff8c8c; }',
           '.rc-d-hunk { color: #7fb8ff; }',
           '.rc-d-meta { opacity: .8; font-weight: 600; }',
@@ -936,7 +979,11 @@ window.__ModuleLoader__.load({
         : null
 
       return h('div', { style: { ...S.column, flex: 1, minHeight: 0, minWidth: 0, width: '100%', maxWidth: '100%', overflow: 'hidden' }, onPaste: handlePaste },
-        preview ? h(FileSheet, { peerId, ref: preview, onClose: () => setPreview(null) }) : null,
+        preview && typeof preview === 'string'
+          ? h(PathSheet, { peerId, sessionId, filePath: preview, onClose: () => setPreview(null) })
+          : preview
+            ? h(FileSheet, { peerId, ref: preview, onClose: () => setPreview(null) })
+            : null,
         h('div', {
           style: {
             display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 18px',
@@ -1137,7 +1184,17 @@ window.__ModuleLoader__.load({
       }
       if (entry.kind === 'assistant') {
         return h('div', { key: entry.key, style: { ...S.bubble, ...S.assistantBubble } },
-          h('div', { className: 'rc-md', dangerouslySetInnerHTML: { __html: markdownHtml(entry.text) } }),
+          h('div', {
+            className: 'rc-md',
+            dangerouslySetInnerHTML: { __html: markdownHtml(entry.text) },
+            onClick: (event) => {
+              const target = event.target.closest?.('.rc-file')
+              if (!target) return
+              event.preventDefault()
+              const filePath = target.getAttribute('data-path')
+              if (filePath) context.onOpenFile?.(filePath)
+            },
+          }),
           h(CopyButton, { value: entry.text }),
         )
       }

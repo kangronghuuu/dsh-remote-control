@@ -2,7 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import dgram from 'node:dgram'
 import http from 'node:http'
 import https from 'node:https'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { sasCode, signPayload, verifyPayload } from './identity.js'
 import { createCipherPair, createBoxCipher, deriveEphemeralKey, deriveSessionKey, ephemeralPublicPem, generateEphemeralKeypair, preferredCipherName, supportedCiphers, WIRE_VERSION } from './crypto.js'
@@ -48,6 +48,7 @@ const SCOPE_BY_PATH = [
   [/^\/peer\/hitl$/, () => 'transcript:read'],
   [/^\/peer\/hitl\/answer$/, () => 'prompt:send'],
   [/^\/peer\/attachment$/, () => 'transcript:read'],
+  [/^\/peer\/file$/, () => 'transcript:read'],
   [/^\/peer\/state$/, () => 'transcript:read'],
   [/^\/peer\/queue$/, () => 'prompt:send'],
   [/^\/peer\/history$/, () => 'transcript:read'],
@@ -1018,6 +1019,25 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
         return reply(200, (await sessions.updateQueue(sessionId, itemId, kind)) ?? { accepted: true })
       } catch (error) {
         return reply(409, { error: 'queue-update-failed', message: error?.message || String(error) })
+      }
+    }
+    if (pathname === '/peer/file' && req.method === 'GET') {
+      // Text preview of a file on this Host, resolved against the session's cwd.
+      const sessionId = String(url.searchParams.get('sessionId') || '')
+      const requested = String(url.searchParams.get('path') || '')
+      if (!requested) return reply(400, { error: 'missing-path' })
+      try {
+        const items = await sessions.list()
+        const base = items.find((item) => item.id === sessionId)?.cwd || ''
+        const target = path.isAbsolute(requested) ? requested : path.resolve(base || process.cwd(), requested)
+        const real = await realpath(target)
+        const info = await stat(real)
+        if (!info.isFile()) return reply(400, { error: 'not-a-file' })
+        if (info.size > 200_000) return reply(413, { error: 'file-too-large', size: info.size })
+        const data = await readFile(real)
+        return reply(200, { path: real, name: path.basename(real), size: info.size, text: data.toString('utf8') })
+      } catch (error) {
+        return reply(404, { error: 'not-found', message: error?.message || String(error) })
       }
     }
     if (pathname === '/peer/attachment' && req.method === 'GET') {

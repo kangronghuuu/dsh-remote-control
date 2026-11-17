@@ -625,17 +625,44 @@ function renderMath(tex, display) {
   return node
 }
 
+/** A path an agent printed: no scheme, a slash and an extension. */
+function looksLikeFilePath(value) {
+  const text = String(value ?? '').trim()
+  if (text === '' || text.length > 300) return false
+  if (/^[a-z]+:/i.test(text) || text.startsWith('#') || text.startsWith('//')) return false
+  if (text.includes(' ')) return false
+  return /\.[A-Za-z0-9]{1,8}$/.test(text) && (text.includes('/') || text.startsWith('.'))
+}
+
+/**
+ * A file reference opens the Host's preview instead of navigating: a relative
+ * path is meaningless to a browser, but the Host resolves it against the session
+ * directory.
+ */
+function fileRefNode(filePath, label) {
+  const node = document.createElement('button')
+  node.type = 'button'
+  node.className = 'file-ref'
+  node.textContent = label ?? filePath
+  node.title = filePath
+  node.addEventListener('click', (event) => {
+    event.preventDefault()
+    openFile(filePath)
+  })
+  return node
+}
+
 function inlineNodes(text) {
   const nodes = []
-  const pattern = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(\[[^\]\n]+\]\((https?:\/\/[^)\s]+)\))/g
+  const pattern = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(\[[^\]\n]+\]\(([^)\s]+)\))/g
   let last = 0
   let match
   while ((match = pattern.exec(text)) !== null) {
     if (match.index > last) nodes.push(document.createTextNode(text.slice(last, match.index)))
     if (match[1]) {
-      const code = document.createElement('code')
-      code.textContent = match[1].slice(1, -1)
-      nodes.push(code)
+      const codeText = match[1].slice(1, -1)
+      // A path in backticks is usually the file the agent just wrote.
+      nodes.push(looksLikeFilePath(codeText) ? fileRefNode(codeText, null) : Object.assign(document.createElement('code'), { textContent: codeText }))
     } else if (match[2]) {
       const strong = document.createElement('strong')
       strong.textContent = match[2].slice(2, -2)
@@ -645,12 +672,25 @@ function inlineNodes(text) {
       em.textContent = match[3].slice(1, -1)
       nodes.push(em)
     } else if (match[4]) {
-      const link = document.createElement('a')
-      link.href = match[5]
-      link.target = '_blank'
-      link.rel = 'noreferrer noopener'
-      link.textContent = match[4].slice(1, match[4].indexOf(']'))
-      nodes.push(link)
+      const target = match[5]
+      const label = match[4].slice(1, match[4].indexOf(']'))
+      if (/^https?:\/\//i.test(target)) {
+        const link = document.createElement('a')
+        link.href = target
+        link.target = '_blank'
+        link.rel = 'noreferrer noopener'
+        link.textContent = label
+        nodes.push(link)
+      } else if (/^[a-z]+:/i.test(target) && !/^file:/i.test(target)) {
+        const link = document.createElement('a')
+        link.href = target
+        link.textContent = label
+        nodes.push(link)
+      } else if (looksLikeFilePath(target)) {
+        nodes.push(fileRefNode(target.replace(/^file:\/\//, ''), label))
+      } else {
+        nodes.push(document.createTextNode(label))
+      }
     }
     last = pattern.lastIndex
   }

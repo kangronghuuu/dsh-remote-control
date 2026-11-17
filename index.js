@@ -977,6 +977,15 @@ export function apply(ctx, rawConfig) {
         const reply = await fabric.callPeer(deviceId, 'POST', '/peer/hitl/answer', body)
         return json(res, reply.status ?? (reply.ok ? 200 : 502), reply.json ?? { error: reply.error })
       }
+      const fileMatch = action.match(/^\/peer\/([^/]+)\/file$/)
+      if (fileMatch && req.method === 'GET') {
+        const deviceId = decodeURIComponent(fileMatch[1])
+        const sessionId = String(url.searchParams.get('sessionId') || '')
+        const filePath = String(url.searchParams.get('path') || '')
+        const query = '/peer/file?sessionId=' + encodeURIComponent(sessionId) + '&path=' + encodeURIComponent(filePath)
+        const reply = await fabric.callPeer(deviceId, 'GET', query, undefined, { race: true })
+        return json(res, reply.status ?? (reply.ok ? 200 : 502), reply.json ?? { error: reply.error })
+      }
       const attachMatch = action.match(/^\/peer\/([^/]+)\/attachment$/)
       if (attachMatch && req.method === 'GET') {
         const deviceId = decodeURIComponent(attachMatch[1])
