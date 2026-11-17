@@ -224,9 +224,10 @@ export function apply(ctx, rawConfig) {
         const attachment = entry.attachment && typeof entry.attachment === 'object' ? entry.attachment : entry
         const hasId = typeof attachment.attachmentId === 'string' && attachment.attachmentId !== ''
         if (!hasId) continue
-        const kind = entry.type === 'image' || entry.type === 'file'
-          ? entry.type
-          : String(attachment.mediaType || '').startsWith('image/') ? 'image' : 'file'
+        const looksImage = String(attachment.mediaType || '').startsWith('image/')
+        const kind = looksImage
+          ? 'image'
+          : entry.type === 'image' || entry.type === 'file' ? entry.type : 'file'
         parts.push({ type: kind, attachment })
       }
       if (parts.length === 0) throw new Error('empty prompt')
@@ -1113,10 +1114,14 @@ export function apply(ctx, rawConfig) {
       }
       if (operation === 'prompt' && req.method === 'POST') {
         const body = await readJson(req)
+        // Attachments are the whole point of a pasted image: forwarding only the
+        // text silently turned an image prompt into a text prompt.
+        const attachments = Array.isArray(body?.attachments) ? body.attachments : []
         const reply = await fabric.callPeer(deviceId, 'POST', '/peer/prompt', {
           sessionId: body?.sessionId,
           text: body?.text,
           mode: body?.mode,
+          attachments,
         })
         return json(res, reply.status ?? (reply.ok ? 200 : 502), reply.json ?? { error: reply.error })
       }
