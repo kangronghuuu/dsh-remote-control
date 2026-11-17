@@ -532,29 +532,29 @@ window.__ModuleLoader__.load({
       return String(ref.path || ref.filePath || ref.name || '')
     }
 
-    function AttachmentImage({ peerId, sessionId, ref }) {
+    function AttachmentImage({ peerId, sessionId, attachment }) {
       const [src, setSrc] = useState('')
       useEffect(() => {
-        if (!hasAttachmentId(ref)) return undefined
+        if (!hasAttachmentId(attachment)) return undefined
         let alive = true
-        const url = '/remote-control/api/peer/' + encodeURIComponent(peerId) + '/attachment?ref=' + encodeURIComponent(JSON.stringify(ref))
+        const url = '/remote-control/api/peer/' + encodeURIComponent(peerId) + '/attachment?ref=' + encodeURIComponent(JSON.stringify(attachment))
         api(url).then((value) => {
           if (!alive || !value?.data) return
           setSrc('data:' + (value.mediaType || 'image/png') + ';base64,' + value.data)
         }).catch(() => {})
         return () => { alive = false }
-      }, [peerId, ref])
+      }, [peerId, attachment])
       if (!src) {
         // No usable id: show the path as a file reference instead of requesting a
         // broken /attachment URL.
-        const filePath = refPath(ref)
+        const filePath = refPath(attachment)
         return filePath
           ? h(PathImage, { peerId, sessionId, filePath })
           : h('span', { style: S.meta }, 'image')
       }
       return h('img', {
         src,
-        alt: ref?.name || 'image',
+        alt: attachment?.name || 'image',
         style: S.messageImage,
         onClick: () => window.open(src, '_blank'),
       })
@@ -612,15 +612,15 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function FileSheet({ peerId, ref, onClose }) {
+    function FileSheet({ peerId, attachment, onClose }) {
       const [state, setState] = useState({ status: 'loading', text: '', dataUrl: '' })
       useEffect(() => {
-        if (!hasAttachmentId(ref)) {
+        if (!hasAttachmentId(attachment)) {
           setState({ status: 'error', text: '', dataUrl: '' })
           return undefined
         }
         let alive = true
-        const url = '/remote-control/api/peer/' + encodeURIComponent(peerId) + '/attachment?ref=' + encodeURIComponent(JSON.stringify(ref))
+        const url = '/remote-control/api/peer/' + encodeURIComponent(peerId) + '/attachment?ref=' + encodeURIComponent(JSON.stringify(attachment))
         api(url).then((value) => {
           if (!alive || !value?.data) { if (alive) setState({ status: 'error', text: '', dataUrl: '' }); return }
           const mediaType = value.mediaType || 'application/octet-stream'
@@ -635,18 +635,18 @@ window.__ModuleLoader__.load({
           }
         }).catch(() => { if (alive) setState({ status: 'error', text: '', dataUrl: '' }) })
         return () => { alive = false }
-      }, [peerId, ref])
+      }, [peerId, attachment])
       return h('div', { style: S.sheet, onClick: (event) => { if (event.target === event.currentTarget) onClose() } },
         h('div', { style: S.sheetCard },
           h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-            h('strong', { style: { flex: 1, fontSize: '13px' } }, ref?.name || 'Attachment'),
+            h('strong', { style: { flex: 1, fontSize: '13px' } }, attachment?.name || 'Attachment'),
             h('button', { type: 'button', style: S.button, onClick: onClose }, 'Close'),
           ),
           state.status === 'loading' ? h('div', { style: S.meta }, 'Loading\u2026') : null,
           state.status === 'error' ? h('div', { style: S.meta }, 'Could not load this attachment.') : null,
           state.status === 'text' ? h('pre', { style: S.sheetText }, state.text) : null,
           state.status === 'binary'
-            ? h('a', { href: state.dataUrl, download: ref?.name || 'attachment', style: S.button }, 'Download ' + (ref?.name || 'file'))
+            ? h('a', { href: state.dataUrl, download: attachment?.name || 'attachment', style: S.button }, 'Download ' + (attachment?.name || 'file'))
             : null,
         ),
       )
@@ -823,7 +823,7 @@ window.__ModuleLoader__.load({
         if (!node || entries.length === 0) return
         restoredScroll.current = true
         if (typeof initialScrollTop === 'number' && initialScrollTop > 0) node.scrollTop = initialScrollTop
-      }, [entries, running, runningKnown, sessionId])
+      }, [entries])
 
       // Image chips get a local thumbnail so a paste is visibly accepted.
       const previews = useRef(new Map())
@@ -997,7 +997,7 @@ window.__ModuleLoader__.load({
         else if (reason.kind === 'error') setTurnAlert({ kind: 'error', key: lastEnd?.key, text: 'Turn failed: ' + (reason.error?.message || reason.error?.code || 'unknown error') + when })
         else if (reason.kind && reason.kind !== 'completed') setTurnAlert({ kind: 'other', text: 'Turn ended unexpectedly (' + reason.kind + ')' + when })
         else setTurnAlert(null)
-      }, [entries])
+      }, [entries, running, runningKnown, sessionId])
 
       const [hitl, setHitl] = useState([])
       const refreshHitl = useCallback(async () => {
@@ -1224,7 +1224,7 @@ window.__ModuleLoader__.load({
         preview && typeof preview === 'string'
           ? h(PathSheet, { peerId, sessionId, filePath: preview, onClose: () => setPreview(null) })
           : preview
-            ? h(FileSheet, { peerId, ref: preview, onClose: () => setPreview(null) })
+            ? h(FileSheet, { peerId, attachment: preview, onClose: () => setPreview(null) })
             : null,
         h('div', {
           style: {
@@ -1463,7 +1463,7 @@ window.__ModuleLoader__.load({
         return h('div', { key: entry.key, style: { ...S.bubble, ...S.userBubble } },
           entry.text ? h('div', { style: { whiteSpace: 'pre-wrap' } }, entry.text) : null,
           entry.images?.length
-            ? h('div', { style: S.imageRow }, entry.images.map((ref, position) => h(AttachmentImage, { key: (ref.attachmentId || '') + position, peerId: context.peerId, sessionId: context.sessionId, ref })))
+            ? h('div', { style: S.imageRow }, entry.images.map((ref, position) => h(AttachmentImage, { key: (ref.attachmentId || '') + position, peerId: context.peerId, sessionId: context.sessionId, attachment: ref })))
             : null,
           visuals.images.length
             ? h('div', { style: S.imageRow }, visuals.images.map((ref, position) => h(PathImage, {
@@ -1488,7 +1488,7 @@ window.__ModuleLoader__.load({
         const visuals = splitVisualFiles(entry.files)
         return h('div', { key: entry.key, style: { ...S.bubble, ...S.assistantBubble } },
           entry.images?.length
-            ? h('div', { style: S.imageRow }, entry.images.map((ref, position) => h(AttachmentImage, { key: 'a' + position, peerId: context.peerId, sessionId: context.sessionId, ref })))
+            ? h('div', { style: S.imageRow }, entry.images.map((ref, position) => h(AttachmentImage, { key: 'a' + position, peerId: context.peerId, sessionId: context.sessionId, attachment: ref })))
             : null,
           visuals.images.length
             ? h('div', { style: S.imageRow }, visuals.images.map((ref, position) => h(PathImage, {
