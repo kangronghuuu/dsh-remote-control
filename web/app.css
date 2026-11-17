@@ -540,6 +540,13 @@ details.tool.error summary .tool-name { color: var(--danger); }
   padding: 8px 12px 0;
   background: color-mix(in srgb, var(--bg) 88%, transparent);
 }
+.chip-thumb {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+}
 .chip {
   display: inline-flex;
   align-items: center;

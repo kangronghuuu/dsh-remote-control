@@ -206,15 +206,10 @@ function startApp() {
     el.fileInput.value = ''
     for (const file of files) uploadFile(file)
   })
-  // Pasting a screenshot is the fastest path on a phone that cannot drag files.
+  // Pasting is the fastest path on a phone: screenshots arrive as files, but so
+  // do PDFs and text documents from a desktop clipboard, so accept every file.
   el.input.addEventListener('paste', (event) => {
-    const items = event.clipboardData?.items ?? []
-    const files = []
-    for (const item of items) {
-      if (item.kind !== 'file' || !String(item.type).startsWith('image/')) continue
-      const file = item.getAsFile()
-      if (file) files.push(file)
-    }
+    const files = pastedFiles(event.clipboardData)
     if (files.length === 0) return
     event.preventDefault()
     for (const file of files) uploadFile(file)
@@ -1927,6 +1922,20 @@ function toBase64(buffer) {
   return btoa(binary)
 }
 
+function pastedFiles(transfer) {
+  const files = []
+  for (const item of transfer?.items ?? []) {
+    if (item.kind !== 'file') continue
+    const file = item.getAsFile()
+    if (file) files.push(file)
+  }
+  // Some platforms expose the clipboard files only through the plain list.
+  if (files.length === 0) {
+    for (const file of transfer?.files ?? []) files.push(file)
+  }
+  return files
+}
+
 async function uploadFile(file) {
   if (!state.sessionId || !file) return
   if (file.size <= 0) {
@@ -1938,7 +1947,14 @@ async function uploadFile(file) {
     return
   }
 
-  const entry = { name: file.name, size: file.size, state: 'uploading', progress: 0 }
+  const isImage = String(file.type || '').startsWith('image/')
+  const entry = {
+    name: file.name,
+    size: file.size,
+    state: 'uploading',
+    progress: 0,
+    preview: isImage && typeof URL.createObjectURL === 'function' ? URL.createObjectURL(file) : '',
+  }
   state.pending.push(entry)
   renderAttachments()
 
@@ -1983,6 +1999,14 @@ function renderAttachments() {
     chip.className = 'chip'
     chip.dataset.state = entry.state
 
+    if (entry.preview) {
+      const thumb = document.createElement('img')
+      thumb.className = 'chip-thumb'
+      thumb.src = entry.preview
+      thumb.alt = entry.name
+      chip.append(thumb)
+    }
+
     const name = document.createElement('span')
     name.className = 'chip-name'
     name.textContent = entry.name
@@ -1999,6 +2023,7 @@ function renderAttachments() {
     remove.setAttribute('aria-label', `Remove ${entry.name}`)
     remove.textContent = '×'
     remove.addEventListener('click', () => {
+      if (entry.preview && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(entry.preview)
       state.pending = state.pending.filter((item) => item !== entry)
       renderAttachments()
     })
