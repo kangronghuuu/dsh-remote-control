@@ -8,7 +8,7 @@ Pair two Hosts once, then read and control each other's sessions: send prompts, 
 - **One approval per device**, checked against a short SAS code, with per-device scopes and instant revoke.
 - **End-to-end encrypted** peer lane (X25519 → HKDF → AES-256-GCM) with forward secrecy and automatic re-handshake after a restart on either side.
 
-Current version: **0.7.32** · requires DSH `0.2.x` · Node 20+
+Requires DSH `0.2.x` · Node 20+
 
 ## Install
 
