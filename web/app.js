@@ -1933,6 +1933,16 @@ function handleLive(frame) {
     state.live = document.createElement('div')
     state.live.className = 'bubble assistant live'
     state.liveText = ''
+    state.liveReasoning = ''
+    const thinking = document.createElement('details')
+    thinking.className = 'live-reasoning'
+    thinking.open = true
+    const thinkingBody = document.createElement('div')
+    thinkingBody.className = 'live-reasoning-body'
+    thinking.append(thinkingBody)
+    state.liveThinking = thinking
+    state.live.append(thinking)
+    thinking.hidden = true
     const body = document.createElement('div')
     body.className = 'live-body'
     state.live.append(body)
@@ -1943,7 +1953,12 @@ function handleLive(frame) {
     const chunk = frame.chunk || {}
     if (!state.live) return
     const body = state.live.querySelector('.live-body')
-    if (chunk.type === 'text-delta') {
+    if (chunk.type === 'reasoning-delta') {
+      state.liveReasoning = ((state.liveReasoning || '') + String(chunk.text ?? '')).slice(0, 20000)
+      if (state.liveThinking) state.liveThinking.hidden = false
+      const thinkingBody = state.liveThinking?.querySelector('.live-reasoning-body')
+      if (thinkingBody) thinkingBody.textContent = state.liveReasoning
+    } else if (chunk.type === 'text-delta') {
       state.liveText += String(chunk.text ?? '')
       body.textContent = state.liveText
     } else if (chunk.type === 'block-end' && chunk.block?.type === 'text') {

@@ -123,6 +123,7 @@ window.__ModuleLoader__.load({
         width: 'min(92vw, 640px)', maxHeight: '80vh', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '8px',
         padding: '14px', borderRadius: '12px', background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l1)',
       },
+      sheetImage: { maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain', borderRadius: '8px', alignSelf: 'center' },
       sheetText: { margin: 0, padding: '8px', borderRadius: '8px', fontSize: '11px', whiteSpace: 'pre-wrap', maxHeight: '52vh', overflow: 'auto', background: 'var(--dsw-alias-bg-layer-3, rgba(127,127,127,.12))' },
       pendingRow: { display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', padding: '6px 0' },
       pendingThumb: { width: '18px', height: '18px', borderRadius: '4px', objectFit: 'cover' },
@@ -519,17 +520,27 @@ window.__ModuleLoader__.load({
      * A non-image attachment: text opens inline, anything else downloads. The
      * bytes come over the peer channel like images do.
      */
+    /** Extensions whose preview must not be read as text. */
+    const IMAGE_EXTENSIONS = /\.(png|jpe?g|webp|gif|svg)$/i
+    const PDF_EXTENSION = /\.pdf$/i
+
     /** A file path on the peer: read it through the Host and show the text. */
     function PathSheet({ peerId, sessionId, filePath, onClose }) {
-      const [state, setState] = useState({ status: 'loading', text: '', size: 0 })
+      const [state, setState] = useState({ status: 'loading', text: '', dataUrl: '', mediaType: '', size: 0 })
       useEffect(() => {
         let alive = true
-        const url = '/remote-control/api/peer/' + encodeURIComponent(peerId) + '/file?sessionId=' + encodeURIComponent(sessionId) + '&path=' + encodeURIComponent(filePath)
+        const binary = IMAGE_EXTENSIONS.test(filePath) || PDF_EXTENSION.test(filePath)
+        const url = '/remote-control/api/peer/' + encodeURIComponent(peerId) + '/file?sessionId=' + encodeURIComponent(sessionId) + '&path=' + encodeURIComponent(filePath) + (binary ? '&raw=1' : '')
         api(url).then((value) => {
           if (!alive) return
-          if (value?.text === undefined) setState({ status: 'error', text: '', size: 0 })
-          else setState({ status: 'text', text: String(value.text), size: Number(value.size) || 0 })
-        }).catch(() => { if (alive) setState({ status: 'error', text: '', size: 0 }) })
+          if (binary && value?.data) {
+            setState({ status: 'binary', text: '', dataUrl: 'data:' + (value.mediaType || 'application/octet-stream') + ';base64,' + value.data, mediaType: value.mediaType || '', size: Number(value.size) || 0 })
+          } else if (value?.text !== undefined) {
+            setState({ status: 'text', text: String(value.text), dataUrl: '', mediaType: value.mediaType || '', size: Number(value.size) || 0 })
+          } else {
+            setState({ status: 'error', text: '', dataUrl: '', mediaType: '', size: 0 })
+          }
+        }).catch(() => { if (alive) setState({ status: 'error', text: '', dataUrl: '', mediaType: '', size: 0 }) })
         return () => { alive = false }
       }, [peerId, sessionId, filePath])
       return h('div', { style: S.sheet, onClick: (event) => { if (event.target === event.currentTarget) onClose() } },
@@ -542,6 +553,12 @@ window.__ModuleLoader__.load({
           state.status === 'error' ? h('div', { style: S.meta }, 'Could not read this file.') : null,
           state.status === 'text'
             ? h('pre', { style: S.sheetText }, state.text || '(empty file)')
+            : null,
+          state.status === 'binary' && state.mediaType.startsWith('image/')
+            ? h('img', { src: state.dataUrl, alt: filePath, style: S.sheetImage })
+            : null,
+          state.status === 'binary'
+            ? h('a', { href: state.dataUrl, download: filePath.split('/').pop() || 'file', style: S.button }, 'Download')
             : null,
         ),
       )
@@ -614,6 +631,7 @@ window.__ModuleLoader__.load({
     function Chat({ peerId, sessionId, title, blank, initialScrollTop, initialPinned, onScrollTop, onNewSession }) {
       const [entries, setEntries] = useState([])
       const [live, setLive] = useState('')
+      const [liveReasoning, setLiveReasoning] = useState('')
       const [running, setRunning] = useState(false)
       const [draft, setDraft] = useState('')
       const [pendingFiles, setPendingFiles] = useState([])
@@ -698,12 +716,17 @@ window.__ModuleLoader__.load({
           }
           if (frame.type === 'assistant-stream') {
             const inner = frame.frame || {}
-            if (inner.type === 'start') { setLive(''); return }
+            if (inner.type === 'start') { setLive(''); setLiveReasoning(''); return }
             if (inner.type === 'chunk' && inner.chunk?.type === 'text-delta') {
               setLive((current) => current + String(inner.chunk.text ?? ''))
             }
+            // Thinking streams as its own delta; dropping it was why reasoning
+            // only appeared once the message finished.
+            if (inner.type === 'chunk' && inner.chunk?.type === 'reasoning-delta') {
+              setLiveReasoning((current) => (current + String(inner.chunk.text ?? '')).slice(0, 20_000))
+            }
             if (inner.type === 'end') {
-              setTimeout(() => setLive(''), 700)
+              setTimeout(() => { setLive(''); setLiveReasoning('') }, 700)
             }
             return
           }
@@ -1119,7 +1142,17 @@ window.__ModuleLoader__.load({
           streamState === 'error' && entries.length > 0
             ? h('div', { style: S.note }, 'Stream lost — retrying…')
             : null,
-          live ? h('div', { style: { ...S.bubble, ...S.assistantBubble, opacity: 0.85 } }, live) : null,
+          live || liveReasoning
+            ? h('div', { style: { ...S.bubble, ...S.assistantBubble, opacity: 0.85 } },
+              liveReasoning
+                ? h('details', { style: S.reasoningBlock, open: true },
+                  h('summary', { style: { cursor: 'pointer' } }, 'Reasoning \u00b7 streaming\u2026'),
+                  h('div', { style: S.reasoningBody }, liveReasoning),
+                )
+                : null,
+              live ? h('div', { style: { whiteSpace: 'pre-wrap' } }, live) : null,
+            )
+            : null,
         ),
         hitl.length > 0
           ? h('div', { style: S.hitlStack }, hitl.map((item) => h(HitlCard, { key: item.requestId, item, onAnswer: answerHitl })))

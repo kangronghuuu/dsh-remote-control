@@ -56,6 +56,22 @@ const SCOPE_BY_PATH = [
   [/^\/peer\/upload\//, () => 'files:write'],
 ]
 
+/** Media type for paths that a text preview would corrupt. */
+const MEDIA_BY_EXTENSION = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.pdf': 'application/pdf',
+}
+
+function mediaTypeForFile(filePath) {
+  const ext = path.extname(String(filePath ?? '')).toLowerCase()
+  return MEDIA_BY_EXTENSION[ext] ?? ''
+}
+
 /** A relay URL that only resolves on this machine cannot reach a peer. */
 function isLoopbackRelay(url) {
   return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i.test(String(url ?? ''))
@@ -1077,9 +1093,23 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
         const real = await realpath(target)
         const info = await stat(real)
         if (!info.isFile()) return reply(400, { error: 'not-a-file' })
+        const mediaType = mediaTypeForFile(real)
+        // Images and PDFs are binary: a text preview would corrupt them, so the
+        // caller asks for raw base64 and renders or downloads it instead.
+        if (url.searchParams.get('raw') === '1' && mediaType !== '') {
+          if (info.size > 8 * 1024 * 1024) return reply(413, { error: 'file-too-large', size: info.size })
+          const bytes = await readFile(real)
+          return reply(200, {
+            path: real,
+            name: path.basename(real),
+            size: info.size,
+            mediaType,
+            data: bytes.toString('base64'),
+          })
+        }
         if (info.size > 200_000) return reply(413, { error: 'file-too-large', size: info.size })
         const data = await readFile(real)
-        return reply(200, { path: real, name: path.basename(real), size: info.size, text: data.toString('utf8') })
+        return reply(200, { path: real, name: path.basename(real), size: info.size, mediaType, text: data.toString('utf8') })
       } catch (error) {
         return reply(404, { error: 'not-found', message: error?.message || String(error) })
       }

@@ -1062,7 +1062,8 @@ export function apply(ctx, rawConfig) {
         const deviceId = decodeURIComponent(fileMatch[1])
         const sessionId = String(url.searchParams.get('sessionId') || '')
         const filePath = String(url.searchParams.get('path') || '')
-        const query = '/peer/file?sessionId=' + encodeURIComponent(sessionId) + '&path=' + encodeURIComponent(filePath)
+        const raw = url.searchParams.get('raw') === '1' ? '&raw=1' : ''
+        const query = '/peer/file?sessionId=' + encodeURIComponent(sessionId) + '&path=' + encodeURIComponent(filePath) + raw
         const reply = await fabric.callPeer(deviceId, 'GET', query, undefined, { race: true })
         return json(res, reply.status ?? (reply.ok ? 200 : 502), reply.json ?? { error: reply.error })
       }
