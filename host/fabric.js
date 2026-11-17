@@ -435,7 +435,9 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
     // bad-envelope until the Host itself restarted. Keep retrying on a slow tick
     // while any approved peer still lacks an ephemeral.
     const refreshMs = Number.isInteger(config.channelRefreshMs) ? config.channelRefreshMs : 2500
-    // Retry every 10s while a peer still lacks an ephemeral, so a one-side\n    // restart heals within seconds instead of half a minute.\n    const refreshRetryMs = Math.min(Math.max(refreshMs * 4, 10_000), 30_000)
+    // Retry every 10s while a peer still lacks an ephemeral, so a one-side
+    // restart heals within seconds instead of half a minute.
+    const refreshRetryMs = Math.min(Math.max(refreshMs * 4, 10_000), 30_000)
     const refreshOne = () => {
       let missing = 0
       for (const deviceId of approvals.keys()) {
