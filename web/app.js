@@ -550,6 +550,9 @@ function handleFrame(frame) {
     refreshQueue()
         state.snapshotRecords = frame.records || []
     recomputeTurnAlert()
+    // The poll may have answered before the replay arrived, in which case the open
+    // turn had no id yet; confirm it now that the history is loaded.
+    if (state.runningKnown && state.running !== true && state.openTurnSeq) verifyInterrupted()
     updateHistoryButton()
     return
   }
@@ -1015,6 +1018,16 @@ function appendEvent(event) {
   state.seen.add(event.seq)
   state.lastSeq = Math.max(state.lastSeq, event.seq)
   if (state.earliestSeq === null || event.seq < state.earliestSeq) state.earliestSeq = event.seq
+
+  // Turn boundaries keep the derived alert in sync with what actually happened;
+  // a stale replay is what made a just-completed turn look interrupted.
+  if (event.type === 'turn/start') state.openTurnSeq = event.seq
+  if (event.type === 'turn/end') state.openTurnSeq = null
+  if (event.type === 'turn/start' || event.type === 'turn/end') {
+    state.snapshotRecords = state.snapshotRecords || []
+    state.snapshotRecords.push({ type: 'event', event })
+    if (state.snapshotRecords.length > 400) state.snapshotRecords.splice(0, state.snapshotRecords.length - 400)
+  }
 
   const data = event.data || {}
   switch (event.type) {
@@ -1887,9 +1900,14 @@ async function refreshQueue() {
       const wasKnown = state.runningKnown === true
       state.runningKnown = true
       const changed = state.running !== value.running
-      if (changed) setRunning(value.running)
-      // Re-evaluate also on the first answer: before it the interrupted alert is
-      // deliberately suppressed, so the banner needs this trigger.
+      if (value.running === false && (changed || !wasKnown)) {
+        if (changed) setRunning(false)
+        // The turn just stopped (or was already over when the page opened): ask the
+        // Host how it ended instead of guessing from a possibly stale replay.
+        verifyInterrupted()
+      } else if (changed) {
+        setRunning(true)
+      }
       if (changed || !wasKnown) recomputeTurnAlert()
     }
     if (value && state.sessionId) renderQueue(Array.isArray(value.queue) ? value.queue : [])
@@ -2074,6 +2092,42 @@ function dismissAlert(info) {
 }
 
 /** Derive the alert from the last replay plus the Host's running flag. */
+/**
+ * The Host is the authority on how a turn ended. Derived "no end event" guesses are
+ * unreliable (a lagging stream looks identical to a crash), so the interrupted
+ * alert is only raised after the Host's own history confirms the turn is open.
+ */
+async function verifyInterrupted() {
+  const openSeq = state.openTurnSeq
+  if (!openSeq || !state.sessionId) {
+    state.turnAlert = null
+    renderTurnBanner()
+    return
+  }
+  let records = null
+  try {
+    const value = await request(`/api/history?sessionId=${encodeURIComponent(state.sessionId)}&max=40`)
+    records = value?.records || null
+  } catch { /* keep quiet: an unreachable Host is not a turn bug */ }
+  if (!records) { state.turnAlert = null; renderTurnBanner(); return }
+  let endSeen = null
+  let startSeen = null
+  for (const record of records) {
+    const event = record?.event
+    if (!event) continue
+    if (event.type === 'turn/start' && event.seq === openSeq) startSeen = event
+    if (event.type === 'turn/end' && event.seq > openSeq) endSeen = event
+  }
+  if (endSeen || !startSeen) { state.turnAlert = null; renderTurnBanner(); return }
+  const alert = {
+    kind: 'interrupted',
+    seq: openSeq,
+    text: 'The last turn was interrupted (no completion was recorded).',
+  }
+  state.turnAlert = isAlertDismissed(alert) ? null : alert
+  renderTurnBanner()
+}
+
 function recomputeTurnAlert() {
   const records = state.snapshotRecords || []
   let lastStart = null
@@ -2087,14 +2141,10 @@ function recomputeTurnAlert() {
   const running = state.running === true
   let alert = null
   if (lastStart && (!lastEnd || (lastStart.seq ?? 0) > (lastEnd.seq ?? 0))) {
-    // An open turn is only an interruption when the Host says nothing is running,
-    // and only once the Host has told us anything at all.
-    if (!running && state.runningKnown) {
-      alert = {
-        kind: 'interrupted',
-        seq: lastStart.seq,
-        text: 'The last turn was interrupted (no completion was recorded).',
-      }
+    // An open turn is only reported after the Host confirmed it (verifyInterrupted);
+    // here we merely avoid contradicting a running turn.
+    if (state.turnAlert?.kind === 'interrupted') {
+      alert = state.turnAlert
     }
   } else if (lastEnd) {
     const fromEnd = turnAlertFromReason(lastEnd.data?.reason || {}, lastEnd.at || lastEnd.data?.at)

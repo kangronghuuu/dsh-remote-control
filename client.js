@@ -954,6 +954,7 @@ window.__ModuleLoader__.load({
       // Until the Host reports a running flag we cannot tell "still running" from
       // "interrupted", so the interrupted alert waits for the first poll.
       const [runningKnown, setRunningKnown] = useState(false)
+      const runningRef = useRef(false)
       const DISMISSED_KEY = 'dsh-remote-control:dismissed-alerts'
       const readDismissed = () => {
         try { return JSON.parse(window.localStorage.getItem(DISMISSED_KEY) || '{}') || {} } catch { return {} }
@@ -970,6 +971,42 @@ window.__ModuleLoader__.load({
         setTurnAlert(null)
       }
 
+      /**
+       * A turn whose end event never arrived can be a crash or just a lagging
+       * stream, so the Host's own history decides before anything is shown.
+       */
+      const verifyTurnAlert = useCallback(async () => {
+        if (!peerId || !sessionId) return
+        let records = null
+        try {
+          const value = await api('/remote-control/api/peer/' + encodeURIComponent(peerId) + '/history?sessionId=' + encodeURIComponent(sessionId) + '&max=40')
+          records = Array.isArray(value?.records) ? value.records : null
+        } catch { /* unreachable peer is not a turn bug */ }
+        if (!records) return
+        let lastStart = null
+        let lastEnd = null
+        for (const record of records) {
+          const event = record?.event
+          if (!event) continue
+          if (event.type === 'turn/start') lastStart = event
+          if (event.type === 'turn/end') lastEnd = event
+        }
+        const openTurn = lastStart && (!lastEnd || (lastStart.seq ?? 0) > (lastEnd.seq ?? 0))
+        if (openTurn) {
+          const info = { kind: 'interrupted', key: 'e' + lastStart.seq, text: 'The last turn was interrupted (no completion was recorded).' }
+          if (!isDismissed(info)) setTurnAlert(info)
+          return
+        }
+        if (!lastEnd) { setTurnAlert(null); return }
+        const reason = lastEnd.data?.reason || {}
+        const when = lastEnd.at ? ' · ' + new Date(lastEnd.at).toLocaleTimeString() : ''
+        if (isDismissed({ key: 'e' + lastEnd.seq })) { setTurnAlert(null); return }
+        if (reason.kind === 'completed') { setTurnAlert(null); return }
+        if (reason.kind === 'error') setTurnAlert({ kind: 'error', key: 'e' + lastEnd.seq, text: 'Turn failed: ' + (reason.error?.message || reason.error?.code || 'unknown error') + when })
+        else if (reason.kind === 'max-tokens') setTurnAlert({ kind: 'max-tokens', key: 'e' + lastEnd.seq, text: 'Turn stopped at the token limit; the answer is incomplete.' + when })
+        else setTurnAlert({ kind: 'interrupted', key: 'e' + lastEnd.seq, text: 'Turn was interrupted (' + reason.kind + ')' + when })
+      }, [peerId, sessionId])
+
       useEffect(() => {
         // A turn that is still running has no end yet: that is normal, not an
         // interruption, so the alert is only computed once the peer says idle.
@@ -982,10 +1019,10 @@ window.__ModuleLoader__.load({
         if (running) { setTurnAlert(null); return }
         const seqOf = (entry) => Number(String(entry?.key || '').replace(/^e/, '')) || 0
         if (lastStart && (!lastEnd || seqOf(lastStart) > seqOf(lastEnd))) {
-          // Still running, or not known yet: not an interruption.
+          // Still running (or unknown, or already confirmed by the Host): keep the
+          // verified alert instead of deriving one from a possibly lagging replay.
           if (running || !runningKnown) { setTurnAlert(null); return }
-          if (isDismissed(lastStart)) { setTurnAlert(null); return }
-          setTurnAlert({ kind: 'interrupted', key: lastStart.key, text: 'The last turn was interrupted (no completion was recorded).' })
+          setTurnAlert((current) => (current?.kind === 'interrupted' ? current : null))
           return
         }
         const reason = lastEnd?.reason || {}
@@ -1032,8 +1069,12 @@ window.__ModuleLoader__.load({
           // The Host knows whether the session is running; the replayed events do
           // not always, so trust this poll over event-derived flags.
           if (typeof value?.running === 'boolean') {
+            const wasRunning = runningRef.current
+            runningRef.current = value.running
             setRunning(value.running)
             setRunningKnown(true)
+            // The turn stopped on its own: confirm how it ended with the Host.
+            if (wasRunning && value.running === false) verifyTurnAlert()
           }
         } catch { /* peer has no state route */ }
       }, [peerId, sessionId])
