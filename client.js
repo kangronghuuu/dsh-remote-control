@@ -637,6 +637,9 @@ window.__ModuleLoader__.load({
       const [reachability, setReachability] = useState(null)
       // Setup (service, pairing, notifications) is a separate tab so the chat
       // keeps the whole page instead of scrolling past configuration cards.
+      // The device/session sidebar is real width, so it is hidden outright (not
+      // merely folded): a folded pane still reserves its column.
+      const [sidebarOpen, setSidebarOpen] = useState(true)
       const [view, setView] = useState(() => {
         try { return window.localStorage.getItem('dsh-remote-control:view') === 'settings' ? 'settings' : 'chat' } catch { return 'chat' }
       })
@@ -673,6 +676,11 @@ window.__ModuleLoader__.load({
         }
         writeSavedTarget(value)
       }, [openPeer, sessionId])
+
+      // Choosing a session means "start reading": give the transcript the width.
+      useEffect(() => {
+        if (sessionId) setSidebarOpen(false)
+      }, [sessionId])
 
       const approve = useCallback(async (requestId) => {
         setBusy(requestId)
@@ -975,6 +983,13 @@ window.__ModuleLoader__.load({
             h('div', { style: S.subtitle },
               self ? `${self.deviceName} · ${shortAccount(self.userId)} · port ${self.port}` : 'Discovering…'),
           ),
+          h('button', {
+            type: 'button',
+            style: S.button,
+            title: sidebarOpen ? 'Hide the device and session list' : 'Show the device and session list',
+            'aria-pressed': sidebarOpen,
+            onClick: () => setSidebarOpen((value) => !value),
+          }, sidebarOpen ? '\u25E7' : '\u25E8'),
           h('div', { style: { display: 'flex', gap: '4px', padding: '2px', borderRadius: '8px', border: '1px solid var(--dsw-alias-line, #444)' } },
             ...['chat', 'settings'].map((name) => h('button', {
               key: name,
@@ -1201,7 +1216,8 @@ window.__ModuleLoader__.load({
 
         view === 'chat'
           ? h('div', { style: S.body },
-          h(Collapsible, {
+          h('div', { style: sidebarOpen ? { display: 'flex', flexDirection: 'column', minHeight: 0 } : { display: 'none' } },
+              h(Collapsible, {
               title: 'Devices',
               summary: openPeer ? openPeer.deviceName : peers.length + ' found',
               storageKey: 'picker:devices',
@@ -1266,6 +1282,7 @@ window.__ModuleLoader__.load({
             ),
           ),
             ),
+            ),
 
           openPeer
             ? h('div', { style: { ...S.column, flex: 1, minWidth: 0 } },
@@ -1274,7 +1291,8 @@ window.__ModuleLoader__.load({
                 : sessions.length === 0
                   ? h('div', { style: S.empty }, 'This device has no sessions.')
                   : h('div', { style: { display: 'flex', flex: 1, minHeight: 0 } },
-                    h(Collapsible, {
+                    h('div', { style: sidebarOpen ? { display: 'flex', flexDirection: 'column', minHeight: 0 } : { display: 'none' } },
+              h(Collapsible, {
                       title: 'Sessions',
                       summary: sessionId
                         ? (sessions.find((session) => session.id === sessionId)?.title || sessionId)
@@ -1297,6 +1315,7 @@ window.__ModuleLoader__.load({
                       ))),
                     ),
                     ),
+            ),
                     sessionId
                       ? h(Chat, {
                         peerId: openPeer.deviceId,
