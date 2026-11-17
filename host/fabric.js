@@ -56,6 +56,11 @@ const SCOPE_BY_PATH = [
   [/^\/peer\/upload\//, () => 'files:write'],
 ]
 
+/** A relay URL that only resolves on this machine cannot reach a peer. */
+function isLoopbackRelay(url) {
+  return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i.test(String(url ?? ''))
+}
+
 function scopeFor(method, pathname) {
   for (const [pattern, pick] of SCOPE_BY_PATH) {
     if (pattern.test(pathname)) return pick(method)
@@ -610,7 +615,7 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
             deviceName: entry.deviceName ?? 'DSH device',
             secret: entry.secret,
             approvedAt: entry.approvedAt ?? Date.now(),
-            relay: entry.relay ?? '',
+            relay: isLoopbackRelay(entry.relay) ? '' : (entry.relay ?? ''),
             publicKey: entry.publicKey ?? '',
             fingerprint: entry.fingerprint ?? '',
             agreementKey: entry.agreementKey ?? '',
@@ -626,9 +631,16 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
     }
   }
 
+  /** Drop a loopback relay before it is written: it is useless to a peer. */
+  function saneRelayValue(value) {
+    return isLoopbackRelay(value) ? '' : String(value ?? '')
+  }
+
   async function saveApprovals() {
     const peersObject = {}
-    for (const [deviceId, entry] of approvals) peersObject[deviceId] = entry
+    for (const [deviceId, entry] of approvals) {
+      peersObject[deviceId] = entry.relay === undefined ? entry : { ...entry, relay: saneRelayValue(entry.relay) }
+    }
     try {
       await approvalStore.save({ version: 1, peers: peersObject })
     } catch (error) {
@@ -1212,7 +1224,10 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
     const approval = approvals.get(deviceId)
     const bodySize = body === undefined ? 0 : JSON.stringify(body).length
     const started = Date.now()
-    const relayAvailable = Boolean(relay)
+    // A relay pinned as loopback is this Host's own server; asking it about a
+    // remote peer just returns unknown-peer. Treat it as "no relay" for that peer.
+    const pinnedRelay = approvals.get(deviceId)?.relay || peer.relay || ''
+    const relayAvailable = Boolean(relay) && !isLoopbackRelay(pinnedRelay)
     const directParked = laneBlocked(deviceId, 'lan')
     const p2pParked = laneBlocked(deviceId, 'p2p')
 
@@ -1297,7 +1312,16 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
     // the discovery penalty. A fresh announce clears the block again.
     if (relayAvailable && peer.proto !== 'relay' && (directParked || p2pParked)) {
       const relayed = await viaRelayLane()
-      if (relayed.ok || relayed.status !== 503) return finish(relayed, 'relay')
+      if (relayed.ok) return finish(relayed, 'relay')
+      if (RELAY_BROKEN_STATUS.has(relayed.status)) {
+        // The relay cannot route to this peer any more (typically a stale group
+        // after the other side left or restarted). Drop it and try direct.
+        peerRelayBroken(deviceId)
+        const directRetry = await viaDirect()
+        if (!directRetry.error) return finish(directRetry, 'lan')
+        return finish(relayed, 'relay')
+      }
+      if (relayed.status !== 503) return finish(relayed, 'relay')
       const fallback = await viaDirect()
       if (!fallback.error) return finish(fallback, 'lan')
       return finish(relayed, 'relay')
@@ -1310,11 +1334,26 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
       if (!direct.error) return finish(direct, 'lan')
       if (relayAvailable) {
         const relayed = await viaRelayLane()
-        if (relayed.ok || relayed.status !== 503) return finish(relayed, 'relay')
+        if (relayed.ok) return finish(relayed, 'relay')
+        if (RELAY_BROKEN_STATUS.has(relayed.status)) peerRelayBroken(deviceId)
+        else if (relayed.status !== 503) return finish(relayed, 'relay')
       }
       return finish(direct, 'lan')
     }
     return finish(await viaRelayLane(), 'relay')
+  }
+
+  /** A relay 404/502/504 means the group or peer is gone; stop preferring it. */
+  const RELAY_BROKEN_STATUS = new Set([404, 502, 504])
+  function peerRelayBroken(deviceId) {
+    const entry = approvals.get(deviceId)
+    if (entry?.relay) {
+      approvals.set(deviceId, { ...entry, relay: '' })
+      saveApprovals().catch(() => {})
+    }
+    const peer = peers.get(deviceId)
+    if (peer?.relay) peers.set(deviceId, { ...peer, relay: '' })
+    return Boolean(entry?.relay)
   }
 
   async function relayCall(peer, method, pathname, body, secret) {
@@ -1547,6 +1586,7 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
     start,
     stop,
     connect,
+    clearPeerRelay: peerRelayBroken,
     approveRequest,
     denyRequest,
     callPeer,

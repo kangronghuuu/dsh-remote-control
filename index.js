@@ -669,6 +669,13 @@ export function apply(ctx, rawConfig) {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
     const action = url.pathname.slice('/remote-control/api'.length)
 
+    if (action.startsWith('/peer/') && action.endsWith('/relay-clear') && req.method === 'POST') {
+      await ready
+      const deviceId = decodeURIComponent(action.slice('/peer/'.length, -'/relay-clear'.length))
+      if (!deviceId) return json(res, 400, { error: 'missing-device' })
+      const cleared = fabric.clearPeerRelay(deviceId)
+      return json(res, 200, { ok: true, cleared })
+    }
     if (action === '/pairing/rotate' && req.method === 'POST') {
       await ready
       const body = await readJson(req)
