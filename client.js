@@ -60,6 +60,10 @@ window.__ModuleLoader__.load({
         background: 'var(--dsw-alias-bg-layer-3, rgba(127,127,127,.12))',
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '11px', whiteSpace: 'pre-wrap',
       },
+      copyButton: {
+        marginTop: '4px', padding: '2px 7px', borderRadius: '6px', fontSize: '10px', cursor: 'pointer',
+        background: 'transparent', color: 'inherit', border: '1px solid var(--dsw-alias-border-l1)',
+      },
       toolRow: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', alignSelf: 'flex-start' },
       note: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', alignSelf: 'center' },
       composer: {
@@ -329,6 +333,52 @@ window.__ModuleLoader__.load({
       'compact/end': 'context compacted',
     }
 
+    /* ---------------- diff + copy ---------------- */
+
+    function looksLikeDiff(text) {
+      const lines = String(text ?? '').split('\n').filter((line) => line.trim() !== '').slice(0, 60)
+      if (lines.length < 2) return false
+      const marks = lines.filter((line) => /^\+(?!\+\+)|^-(?!--)/.test(line)).length
+      if (marks < 2) return false
+      return lines.some((line) => /^@@/.test(line)) || marks / lines.length >= 0.3
+    }
+
+    function diffHtml(text) {
+      return String(text ?? '').split('\n').map((line) => {
+        const safe = escapeHtml(line)
+        if (/^@@/.test(line)) return '<span class="rc-d-hunk">' + safe + '</span>'
+        if (/^\+\+\+|^---/.test(line)) return '<span class="rc-d-meta">' + safe + '</span>'
+        if (/^\+/.test(line)) return '<span class="rc-d-add">' + safe + '</span>'
+        if (/^-/.test(line)) return '<span class="rc-d-del">' + safe + '</span>'
+        return safe
+      }).join('\n')
+    }
+
+    function copyText(value) {
+      try {
+        navigator.clipboard?.writeText(String(value ?? ''))
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    function CopyButton({ value, label = 'copy' }) {
+      const [done, setDone] = useState(false)
+      return h('button', {
+        type: 'button',
+        style: S.copyButton,
+        title: 'Copy',
+        onClick: (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          if (!copyText(value)) return
+          setDone(true)
+          setTimeout(() => setDone(false), 1200)
+        },
+      }, done ? 'copied' : label)
+    }
+
     function Chat({ peerId, sessionId, title, blank, initialScrollTop, initialPinned, onScrollTop }) {
       const [entries, setEntries] = useState([])
       const [live, setLive] = useState('')
@@ -352,6 +402,10 @@ window.__ModuleLoader__.load({
           '.rc-md ul, .rc-md ol { margin: 0; padding-left: 18px; }',
           '.rc-md a { color: inherit; text-decoration: underline; }',
           '.rc-md hr { border: 0; border-top: 1px solid var(--dsw-alias-border-l1); }',
+          '.rc-d-add { color: #6fe08b; }',
+          '.rc-d-del { color: #ff8c8c; }',
+          '.rc-d-hunk { color: #7fb8ff; }',
+          '.rc-d-meta { opacity: .8; font-weight: 600; }',
         ].join('\n')
         document.head.append(style)
       }, [])
@@ -718,12 +772,12 @@ window.__ModuleLoader__.load({
 
     function renderEntry(entry) {
       if (entry.kind === 'user') return h('div', { key: entry.key, style: { ...S.bubble, ...S.userBubble } }, entry.text)
-      if (entry.kind === 'assistant') return h('div', {
-        key: entry.key,
-        style: { ...S.bubble, ...S.assistantBubble },
-        className: 'rc-md',
-        dangerouslySetInnerHTML: { __html: markdownHtml(entry.text) },
-      })
+      if (entry.kind === 'assistant') {
+        return h('div', { key: entry.key, style: { ...S.bubble, ...S.assistantBubble } },
+          h('div', { className: 'rc-md', dangerouslySetInnerHTML: { __html: markdownHtml(entry.text) } }),
+          h(CopyButton, { value: entry.text }),
+        )
+      }
       if (entry.kind === 'tool') {
         const argsText = entry.args ? JSON.stringify(entry.args, null, 2) : entry.raw
         const hasResult = entry.output !== undefined
@@ -732,9 +786,22 @@ window.__ModuleLoader__.load({
             '\u2699 ' + entry.name + (entry.hint ? '  ' + entry.hint : '') + (hasResult ? '' : '  \u2026')),
           argsText ? h('pre', { style: S.toolPre }, argsText) : null,
           hasResult
-            ? h('pre', { style: { ...S.toolPre, ...(entry.failed ? { color: '#ff8c8c' } : {}) } },
-              entry.output || (entry.failed ? '(failed with no output)' : '(no output)'))
+            ? (looksLikeDiff(entry.output)
+              ? h('pre', {
+                style: S.toolPre,
+                className: 'rc-md',
+                dangerouslySetInnerHTML: { __html: diffHtml(entry.output) },
+              })
+              : h('pre', { style: { ...S.toolPre, ...(entry.failed ? { color: '#ff8c8c' } : {}) } },
+                entry.output || (entry.failed ? '(failed with no output)' : '(no output)')))
             : null,
+          hasResult ? h(CopyButton, { value: entry.output || '' }) : null,
+        )
+      }
+      if (entry.kind === 'compaction') {
+        return h('details', { key: entry.key, style: S.toolBlock },
+          h('summary', { style: { cursor: 'pointer' } }, 'Context compacted \u00b7 ' + entry.text.length + ' chars of summary'),
+          h('div', { className: 'rc-md', dangerouslySetInnerHTML: { __html: markdownHtml(entry.text) } }),
         )
       }
       if (entry.kind === 'reasoning') {
@@ -805,6 +872,11 @@ window.__ModuleLoader__.load({
           return { key, kind: 'turn-end' }
         case 'session/title':
           return null
+        case 'compaction/summary':
+        case 'compact/summary': {
+          const summary = String(data.summary ?? data.text ?? data.content ?? '')
+          return summary ? { key, kind: 'compaction', text: summary } : null
+        }
         default: {
           if (NOISE_EVENTS.has(event.type)) return null
           return { key, kind: 'process', text: PROCESS_LABELS[event.type] || event.type }
