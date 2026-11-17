@@ -609,6 +609,15 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
     } catch (error) {
       log.warn(`[remote-control] could not persist approvals: ${error?.message || error}`)
     }
+    // Mirror the same records into the flat file. The credential store is the
+    // primary source, but when it is not ready early in start-up the loader
+    // falls back to this file; leaving an old key-less copy there made every
+    // signed call fail with "unapproved-device" after a restart.
+    try {
+      await writeFile(stateFile, JSON.stringify({ version: 1, peers: peersObject }, null, 2), { mode: 0o600 })
+    } catch (error) {
+      log.warn(`[remote-control] could not mirror approvals to ${stateFile}: ${error?.message || error}`)
+    }
   }
 
   /* ---------------- inbound: hello + approval ---------------- */
@@ -1513,9 +1522,17 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
           candidates: Array.isArray(peer.candidates) ? peer.candidates.map((entry) => entry.origin + ':' + entry.address + ':' + entry.port) : [],
           timing: peer.lastTiming ?? null,
           blocked: { lan: laneBlocked(peer.deviceId, 'lan'), p2p: laneBlocked(peer.deviceId, 'p2p') },
-          needsReapproval: Boolean(approvals.get(peer.deviceId)?.publicKey && !approvals.get(peer.deviceId)?.agreementKey),
+          // A legacy record can carry only the shared secret and no identity
+          // keys at all; that is exactly as unusable as a missing agreement key.
+          needsReapproval: Boolean(!approvals.get(peer.deviceId)?.publicKey || !approvals.get(peer.deviceId)?.agreementKey),
           punch: approvals.get(peer.deviceId)?.punch ?? null,
-          candidates: Array.isArray(approvals.get(peer.deviceId)?.candidates) ? approvals.get(peer.deviceId).candidates.length : 0,
+          candidates: (() => {
+            const merged = Array.isArray(peer.candidates) ? [...peer.candidates] : []
+            if (!merged.some((entry) => entry && entry.address === peer.address && entry.port === peer.port)) {
+              merged.unshift({ origin: peer.origin === 'tailnet' ? 'tailnet' : 'lan', address: peer.address, port: peer.port })
+            }
+            return merged.filter((entry) => entry && entry.address).map((entry) => (entry.origin === 'tailnet' ? 'tailnet' : 'lan') + ':' + entry.address + ':' + entry.port)
+          })(),
           punchPort: peer.punchPort ?? 0,
           sas: approvals.get(peer.deviceId)?.sas ?? '',
           scopes: approvals.get(peer.deviceId)?.scopes ?? [],
