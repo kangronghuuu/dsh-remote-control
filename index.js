@@ -120,6 +120,21 @@ export function apply(ctx, rawConfig) {
         signal,
       )
     },
+    async state(sessionId) {
+      const state = await ctx.sessionController.state({ sessionId }, AbortSignal.timeout(8000))
+      const queue = (state?.queue ?? [])
+        .map((item) => ({
+          id: String(item?.id ?? ''),
+          placement: String(item?.placement ?? 'queued'),
+          text: contentText(item?.content),
+        }))
+        .filter((item) => item.id !== '' && item.placement === 'queued')
+      return { active: Boolean(state?.active), running: Boolean(state?.running), queue }
+    },
+    async updateQueue(sessionId, itemId, kind) {
+      const action = kind === 'steer' ? { kind: 'steer' } : { kind: 'remove' }
+      return ctx.sessionController.updateQueue({ sessionId, itemId, action })
+    },
     async prompt(sessionId, input) {
       const text = typeof input === 'string' ? input : String(input?.text ?? '')
       const mode = input?.mode === 'steer' ? 'steer' : 'queue'
@@ -872,6 +887,21 @@ export function apply(ctx, rawConfig) {
       return json(res, 200, await fabric.connect(String(body?.deviceId || '')))
     }
 
+      const stateMatch = action.match(/^\/peer\/([^/]+)\/(state|queue)$/)
+      if (stateMatch) {
+        const deviceId = decodeURIComponent(stateMatch[1])
+        const operation = stateMatch[2]
+        if (operation === 'state' && req.method === 'GET') {
+          const sessionId = String(url.searchParams.get('sessionId') || '')
+          const reply = await fabric.callPeer(deviceId, 'GET', '/peer/state?sessionId=' + encodeURIComponent(sessionId), undefined, { race: true })
+          return json(res, reply.status ?? (reply.ok ? 200 : 502), reply.json ?? { error: reply.error })
+        }
+        if (operation === 'queue' && req.method === 'POST') {
+          const body = await readJson(req)
+          const reply = await fabric.callPeer(deviceId, 'POST', '/peer/queue', body)
+          return json(res, reply.status ?? (reply.ok ? 200 : 502), reply.json ?? { error: reply.error })
+        }
+      }
     const match = action.match(/^\/peer\/([^/]+)\/(sessions|stream|prompt|cancel|session-config|hitl|hitl-answer)$/)
       const hitlMatch = action.match(/^\/peer\/([^/]+)\/(hitl|hitl-answer)$/)
       if (hitlMatch && req.method === (hitlMatch[2] === 'hitl' ? 'GET' : 'POST')) {
@@ -917,6 +947,7 @@ export function apply(ctx, rawConfig) {
         const reply = await fabric.callPeer(deviceId, 'POST', '/peer/prompt', {
           sessionId: body?.sessionId,
           text: body?.text,
+          mode: body?.mode,
         })
         return json(res, reply.status ?? (reply.ok ? 200 : 502), reply.json ?? { error: reply.error })
       }

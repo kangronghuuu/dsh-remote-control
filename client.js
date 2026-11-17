@@ -72,6 +72,13 @@ window.__ModuleLoader__.load({
       hitlStack: { display: 'flex', flexDirection: 'column', gap: '8px', padding: '8px 0' },
       imageRow: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px' },
       messageImage: { maxWidth: '180px', maxHeight: '180px', borderRadius: '8px', border: '1px solid var(--dsw-alias-border-l1)', cursor: 'zoom-in' },
+      queueList: { display: 'flex', flexDirection: 'column', gap: '4px', padding: '6px 0' },
+      queueRow: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', opacity: 0.9 },
+      queueButton: {
+        padding: '1px 7px', borderRadius: '6px', fontSize: '10px', cursor: 'pointer',
+        background: 'transparent', color: 'inherit', border: '1px solid var(--dsw-alias-border-l1)',
+      },
+      modeRow: { display: 'flex', alignItems: 'center', gap: '6px', paddingBottom: '4px' },
       hitlCard: {
         display: 'flex', flexDirection: 'column', gap: '6px', padding: '9px 11px', borderRadius: '10px',
         border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)',
@@ -642,6 +649,29 @@ window.__ModuleLoader__.load({
         refreshHitl()
       }
 
+      // Queue and steering, mirroring the phone page: while a turn runs, a new
+      // message can either wait in the queue or be injected into the turn.
+      const [mode, setMode] = useState('queue')
+      const [queue, setQueue] = useState([])
+      const refreshQueue = useCallback(async () => {
+        if (!peerId || !sessionId) return
+        try {
+          const value = await api('/remote-control/api/peer/' + encodeURIComponent(peerId) + '/state?sessionId=' + encodeURIComponent(sessionId))
+          setQueue(Array.isArray(value?.queue) ? value.queue : [])
+        } catch { /* peer has no state route */ }
+      }, [peerId, sessionId])
+      useEffect(() => {
+        refreshQueue()
+        const timer = setInterval(refreshQueue, 2500)
+        return () => clearInterval(timer)
+      }, [refreshQueue])
+      const queueAction = async (item, kind) => {
+        try {
+          await api('/remote-control/api/peer/' + encodeURIComponent(peerId) + '/queue', { sessionId, itemId: item.id, kind })
+        } catch { /* the item may already be gone */ }
+        refreshQueue()
+      }
+
       const send = useCallback(async () => {
         const text = draft.trim()
         const pending = pendingFiles
@@ -673,7 +703,8 @@ window.__ModuleLoader__.load({
           }
           setUploading(null)
           setPendingFiles([])
-          await api(`/remote-control/api/peer/${encodeURIComponent(peerId)}/prompt`, { sessionId, text, attachments: sent })
+          await api(`/remote-control/api/peer/${encodeURIComponent(peerId)}/prompt`, { sessionId, text, attachments: sent, mode })
+        refreshQueue()
         } catch (failure) {
           setUploading(null)
           setDraft(text)
@@ -816,6 +847,22 @@ window.__ModuleLoader__.load({
           ? h('div', { style: S.hitlStack }, hitl.map((item) => h(HitlCard, { key: item.requestId, item, onAnswer: answerHitl })))
           : null,
         configBar,
+        queue.length > 0
+          ? h('div', { style: S.queueList }, queue.map((item) => h('div', { key: item.id, style: S.queueRow },
+            h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, item.text || '(attachment)'),
+            h('button', { type: 'button', style: S.queueButton, onClick: () => queueAction(item, 'steer') }, 'Steer'),
+            h('button', { type: 'button', style: S.queueButton, onClick: () => queueAction(item, 'remove') }, '×'),
+          )))
+          : null,
+        h('div', { style: S.modeRow },
+          ...['queue', 'steer'].map((name) => h('button', {
+            key: name,
+            type: 'button',
+            style: { ...S.queueButton, ...(mode === name ? S.primary : {}) , textTransform: 'capitalize' },
+            onClick: () => setMode(name),
+          }, name)),
+          h('span', { style: S.meta }, mode === 'steer' ? 'inject into the running turn' : 'wait until the turn ends'),
+        ),
         h('div', { style: S.composer, onDragOver: (event) => event.preventDefault(), onDrop: dropFiles },
           pendingFiles.length > 0 || uploading
             ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 6 } },

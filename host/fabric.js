@@ -48,6 +48,8 @@ const SCOPE_BY_PATH = [
   [/^\/peer\/hitl$/, () => 'transcript:read'],
   [/^\/peer\/hitl\/answer$/, () => 'prompt:send'],
   [/^\/peer\/attachment$/, () => 'transcript:read'],
+  [/^\/peer\/state$/, () => 'transcript:read'],
+  [/^\/peer\/queue$/, () => 'prompt:send'],
   [/^\/peer\/upload\//, () => 'files:write'],
 ]
 
@@ -958,7 +960,7 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
       const text = typeof body?.text === 'string' ? body.text : ''
       const attachments = Array.isArray(body?.attachments) ? body.attachments : []
       if (!sessionId || (!text.trim() && attachments.length === 0)) return reply(400, { error: 'bad-request' })
-      const value = await sessions.prompt(sessionId, { text, attachments })
+      const value = await sessions.prompt(sessionId, { text, attachments, mode: body?.mode })
       return reply(200, value)
     }
     if (pathname === '/peer/hitl' && req.method === 'GET') {
@@ -976,6 +978,25 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
       const accepted = bridge.answer(requestId, body)
       // A stale card (already answered elsewhere) is a conflict, not a failure.
       return accepted ? reply(200, { ok: true }) : reply(409, { error: 'stale-request' })
+    }
+    if (pathname === '/peer/state' && req.method === 'GET') {
+      const sessionId = String(url.searchParams.get('sessionId') || '')
+      if (!sessionId) return reply(400, { error: 'missing-session' })
+      if (typeof sessions.state !== 'function') return reply(503, { error: 'state-unavailable' })
+      return reply(200, await sessions.state(sessionId))
+    }
+    if (pathname === '/peer/queue' && req.method === 'POST') {
+      if (typeof sessions.updateQueue !== 'function') return reply(503, { error: 'queue-unavailable' })
+      const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : ''
+      const itemId = typeof body?.itemId === 'string' ? body.itemId : ''
+      const kind = body?.action?.kind ?? body?.kind
+      if (!sessionId || !itemId) return reply(400, { error: 'missing-queue-item' })
+      if (kind !== 'steer' && kind !== 'remove') return reply(400, { error: 'bad-action' })
+      try {
+        return reply(200, (await sessions.updateQueue(sessionId, itemId, kind)) ?? { accepted: true })
+      } catch (error) {
+        return reply(409, { error: 'queue-update-failed', message: error?.message || String(error) })
+      }
     }
     if (pathname === '/peer/attachment' && req.method === 'GET') {
       // Base64 in JSON: the peer channel is JSON end to end, and an 8 MB cap
