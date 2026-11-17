@@ -1835,6 +1835,7 @@ window.__ModuleLoader__.load({
       const [sessionId, setSessionId] = useState(null)
       // Sessions are paged: a Host can own thousands of them.
       const [sessionPage, setSessionPage] = useState({ cursor: null, total: 0, loading: false })
+      const sessionListRef = useRef(null)
       const [notice, setNotice] = useState(null)
       const [wizardSkipped, setWizardSkipped] = useState(false)
       const [notify, setNotify] = useState(null)
@@ -2044,6 +2045,13 @@ window.__ModuleLoader__.load({
           setSessionPage((value) => ({ ...value, loading: false }))
         }
       }, [openPeer, sessionPage.cursor, sessionPage.loading, fetchSessions])
+
+      // A short first page must not look like the whole list.
+      useEffect(() => {
+        const node = sessionListRef.current
+        if (!node || !sessionPage.cursor || sessionPage.loading) return
+        if (node.scrollHeight <= node.clientHeight + 8) loadMoreSessions()
+      }, [sessions, sessionPage.cursor, sessionPage.loading, loadMoreSessions])
 
       // Restore the last peer/session (or a deep link) once both are known.
       useEffect(() => {
@@ -2584,7 +2592,7 @@ window.__ModuleLoader__.load({
                 : sessions.length === 0
                   ? h('div', { style: S.empty }, 'This device has no sessions.')
                   : h('div', { style: { display: 'flex', flex: 1, minHeight: 0 } },
-                    h('div', { style: sidebarOpen ? { display: 'flex', flexDirection: 'column', minHeight: 0 } : { display: 'none' } },
+                    h('div', { style: sidebarOpen ? { display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' } : { display: 'none' } },
               h(Collapsible, {
                       title: 'Sessions',
                       summary: (sessionId
@@ -2594,8 +2602,16 @@ window.__ModuleLoader__.load({
                       defaultOpen: true,
                       forceClose: sessionId ? 1 : 0,
                     },
-                      h('div', { style: { ...S.column, ...S.pane, width: '220px' } },
-                      h('div', { style: S.list }, sessions.map((session) => h('div', {
+                      h('div', { style: { ...S.column, ...S.pane, width: '220px', height: '100%', minHeight: 0 } },
+                      h('div', {
+                        ref: sessionListRef,
+                        style: { ...S.list, minHeight: '120px', maxHeight: '42vh' },
+                        onScroll: (event) => {
+                          const node = event.currentTarget
+                          // Near the end of the list: fetch the next page without a click.
+                          if (node.scrollHeight - node.scrollTop - node.clientHeight < 120) loadMoreSessions()
+                        },
+                      }, sessions.map((session) => h('div', {
                         key: session.id,
                         style: { ...S.row, ...S.rowButton, alignItems: 'center', ...(sessionId === session.id ? S.rowActive : {}) },
                         onClick: () => setSessionId(session.id),
@@ -2616,14 +2632,17 @@ window.__ModuleLoader__.load({
                             ].filter(Boolean).join(' · ')),
                         ),
                       ))),
-                      sessionPage.cursor
-                        ? h('button', {
-                          type: 'button',
-                          style: { ...S.smallButton, margin: '6px 10px' },
-                          disabled: sessionPage.loading,
-                          onClick: loadMoreSessions,
-                        }, sessionPage.loading ? 'Loading\u2026' : 'Load more (' + sessions.length + '/' + sessionPage.total + ')')
-                        : null,
+                      h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px', borderTop: '1px solid var(--dsw-alias-border-l1)' } },
+                        h('span', { style: S.meta }, sessions.length + ' of ' + (sessionPage.total || sessions.length)),
+                        sessionPage.cursor
+                          ? h('button', {
+                            type: 'button',
+                            style: S.smallButton,
+                            disabled: sessionPage.loading,
+                            onClick: loadMoreSessions,
+                          }, sessionPage.loading ? 'Loading\u2026' : 'Load more')
+                          : null,
+                      ),
                     ),
                     ),
             ),
