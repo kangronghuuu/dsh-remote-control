@@ -69,6 +69,11 @@ window.__ModuleLoader__.load({
         padding: '0 7px', borderRadius: '6px', fontSize: '13px', lineHeight: '1.7', cursor: 'pointer',
         background: 'transparent', color: 'inherit', border: '1px solid var(--dsw-alias-border-l1)',
       },
+      hitlStack: { display: 'flex', flexDirection: 'column', gap: '8px', padding: '8px 0' },
+      hitlCard: {
+        display: 'flex', flexDirection: 'column', gap: '6px', padding: '9px 11px', borderRadius: '10px',
+        border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)',
+      },
       toolRow: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', alignSelf: 'flex-start' },
       note: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', alignSelf: 'center' },
       composer: {
@@ -384,6 +389,38 @@ window.__ModuleLoader__.load({
       }, done ? 'copied' : label)
     }
 
+    /**
+     * One pending approval or question raised on the peer that owns the session.
+     * Answered over the peer channel, then the poll clears it.
+     */
+    function HitlCard({ item, onAnswer }) {
+      const question = Array.isArray(item.questions) ? item.questions[0] : null
+      const options = Array.isArray(question?.options) ? question.options : []
+      return h('div', { style: S.hitlCard },
+        h('div', { style: { fontWeight: 600, fontSize: 12 } },
+          (item.kind === 'approval' ? 'Approval needed' : 'Question') + (item.toolName ? ' \u00b7 ' + item.toolName : '')),
+        item.displayReason || item.reason
+          ? h('div', { style: { ...S.meta, whiteSpace: 'pre-wrap' } }, item.displayReason || item.reason)
+          : null,
+        item.kind === 'approval'
+          ? h('div', { style: { display: 'flex', gap: '8px' } },
+            h('button', { type: 'button', style: { ...S.button, ...S.primary }, onClick: () => onAnswer(item, { decision: 'allow' }) }, 'Allow'),
+            h('button', { type: 'button', style: S.button, onClick: () => onAnswer(item, { decision: 'deny' }) }, 'Deny'),
+          )
+          : h('div', null,
+            question?.question ? h('div', { style: S.meta }, question.question) : null,
+            h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+              options.map((option) => h('button', {
+                key: String(option.id ?? option.value ?? option.label),
+                type: 'button',
+                style: S.button,
+                onClick: () => onAnswer(item, { answers: [option.value ?? option.label ?? option] }),
+              }, String(option.label ?? option.value ?? option))),
+            ),
+          ),
+      )
+    }
+
     function Chat({ peerId, sessionId, title, blank, initialScrollTop, initialPinned, onScrollTop }) {
       const [entries, setEntries] = useState([])
       const [live, setLive] = useState('')
@@ -550,6 +587,26 @@ window.__ModuleLoader__.load({
         setTurnCursor(target)
         const node = logRef.current?.querySelector('[data-turn="' + target + '"]')
         node?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      }
+
+      const [hitl, setHitl] = useState([])
+      const refreshHitl = useCallback(async () => {
+        if (!peerId || !sessionId) return
+        try {
+          const value = await api('/remote-control/api/peer/' + encodeURIComponent(peerId) + '/hitl?sessionId=' + encodeURIComponent(sessionId))
+          setHitl(Array.isArray(value?.items) ? value.items : [])
+        } catch { /* older peer: nothing to show */ }
+      }, [peerId, sessionId])
+      useEffect(() => {
+        refreshHitl()
+        const timer = setInterval(refreshHitl, 3000)
+        return () => clearInterval(timer)
+      }, [refreshHitl])
+      const answerHitl = async (item, payload) => {
+        try {
+          await api('/remote-control/api/peer/' + encodeURIComponent(peerId) + '/hitl-answer', { requestId: item.requestId, ...payload })
+        } catch { /* stale card */ }
+        refreshHitl()
       }
 
       const send = useCallback(async () => {
@@ -722,6 +779,9 @@ window.__ModuleLoader__.load({
             : null,
           live ? h('div', { style: { ...S.bubble, ...S.assistantBubble, opacity: 0.85 } }, live) : null,
         ),
+        hitl.length > 0
+          ? h('div', { style: S.hitlStack }, hitl.map((item) => h(HitlCard, { key: item.requestId, item, onAnswer: answerHitl })))
+          : null,
         configBar,
         h('div', { style: S.composer, onDragOver: (event) => event.preventDefault(), onDrop: dropFiles },
           pendingFiles.length > 0 || uploading

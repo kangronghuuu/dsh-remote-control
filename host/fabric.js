@@ -45,6 +45,8 @@ const SCOPE_BY_PATH = [
   [/^\/peer\/prompt$/, () => 'prompt:send'],
   [/^\/peer\/cancel$/, () => 'stop'],
   [/^\/peer\/session\/config$/, (method) => (method === 'GET' ? 'config:read' : 'config:write')],
+  [/^\/peer\/hitl$/, () => 'transcript:read'],
+  [/^\/peer\/hitl\/answer$/, () => 'prompt:send'],
   [/^\/peer\/upload\//, () => 'files:write'],
 ]
 
@@ -62,7 +64,7 @@ function scopeFor(method, pathname) {
  * Everything here is plain Node so it can be exercised without Cordis:
  * `sessions` is a small facade over the Host's session controller.
  */
-export function createFabric({ log, config, self, sessions, stateFile, store, uploads, identity, limits = {} }) {
+export function createFabric({ log, config, self, sessions, stateFile, store, uploads, identity, hitl, limits = {} }) {
   const approvalStore = store ?? createFileStore(stateFile, log)
   const rate = new Map() // deviceId -> { count, resetAt }
   const rateLimit = {
@@ -957,6 +959,22 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
       if (!sessionId || (!text.trim() && attachments.length === 0)) return reply(400, { error: 'bad-request' })
       const value = await sessions.prompt(sessionId, { text, attachments })
       return reply(200, value)
+    }
+    if (pathname === '/peer/hitl' && req.method === 'GET') {
+      const bridge = typeof hitl === 'function' ? hitl() : hitl
+      const sessionId = String(url.searchParams.get('sessionId') || '')
+      if (!bridge?.pendingFor) return reply(503, { error: 'hitl-unavailable' })
+      if (!sessionId) return reply(400, { error: 'missing-session' })
+      return reply(200, { items: bridge.pendingFor(sessionId) })
+    }
+    if (pathname === '/peer/hitl/answer' && req.method === 'POST') {
+      const bridge = typeof hitl === 'function' ? hitl() : hitl
+      if (!bridge?.answer) return reply(503, { error: 'hitl-unavailable' })
+      const requestId = String(body?.requestId || '')
+      if (!requestId) return reply(400, { error: 'missing-request' })
+      const accepted = bridge.answer(requestId, body)
+      // A stale card (already answered elsewhere) is a conflict, not a failure.
+      return accepted ? reply(200, { ok: true }) : reply(409, { error: 'stale-request' })
     }
     if (pathname === '/peer/cancel' && req.method === 'POST') {
       const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : ''

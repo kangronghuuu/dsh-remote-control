@@ -317,6 +317,7 @@ export function apply(ctx, rawConfig) {
     store: createCredentialStore(ctx, peersFile, log),
     uploads,
     identity: () => deviceIdentity,
+    hitl: () => hitl,
     limits: { rateMax: config.rateMax, rateWindowMs: config.rateWindowMs },
     self: () => ({
       deviceId: state?.deviceId ?? '',
@@ -851,7 +852,19 @@ export function apply(ctx, rawConfig) {
       return json(res, 200, await fabric.connect(String(body?.deviceId || '')))
     }
 
-    const match = action.match(/^\/peer\/([^/]+)\/(sessions|stream|prompt|cancel|session-config)$/)
+    const match = action.match(/^\/peer\/([^/]+)\/(sessions|stream|prompt|cancel|session-config|hitl|hitl-answer)$/)
+      const hitlMatch = action.match(/^\/peer\/([^/]+)\/(hitl|hitl-answer)$/)
+      if (hitlMatch && req.method === (hitlMatch[2] === 'hitl' ? 'GET' : 'POST')) {
+        const deviceId = decodeURIComponent(hitlMatch[1])
+        if (hitlMatch[2] === 'hitl') {
+          const sessionId = String(url.searchParams.get('sessionId') || '')
+          const reply = await fabric.callPeer(deviceId, 'GET', `/peer/hitl?sessionId=${encodeURIComponent(sessionId)}`, undefined, { race: true })
+          return json(res, reply.status ?? (reply.ok ? 200 : 502), reply.json ?? { error: reply.error })
+        }
+        const body = await readJson(req)
+        const reply = await fabric.callPeer(deviceId, 'POST', '/peer/hitl/answer', body)
+        return json(res, reply.status ?? (reply.ok ? 200 : 502), reply.json ?? { error: reply.error })
+      }
     if (match) {
       const deviceId = decodeURIComponent(match[1])
       const operation = match[2]
