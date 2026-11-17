@@ -92,35 +92,14 @@ export function apply(ctx, rawConfig) {
   // The session list is queried by peers on every panel refresh. While a turn
   // runs it can be slow, and a slow peer call reads as a dead link, so the last
   // answer is reused briefly and served when a refresh times out.
-  const sessionsListCache = { at: 0, items: [] }
+  const sessionsListCache = { at: 0, items: [], refreshing: null }
 
-  const sessions = {
-    /**
-     * One page of the session list. The full list is cached; paging keeps both
-     * the payload and the render bounded as the history grows.
-     */
-    async page(options) {
-      const limit = Math.min(100, Math.max(1, Number(options?.limit) || 40))
-      const offset = Math.max(0, Number(options?.cursor) || 0)
-      let items
+  /** Refresh once; concurrent callers share the in-flight promise. */
+  function refreshSessionList() {
+    if (sessionsListCache.refreshing) return sessionsListCache.refreshing
+    sessionsListCache.refreshing = (async () => {
       try {
-        items = await this.list()
-      } catch {
-        items = []
-      }
-      const slice = items.slice(offset, offset + limit)
-      const nextOffset = offset + slice.length
-      return {
-        items: slice,
-        total: items.length,
-        nextCursor: nextOffset < items.length ? String(nextOffset) : null,
-      }
-    },
-    async list() {
-      const now = Date.now()
-      if (now - sessionsListCache.at < 2500) return sessionsListCache.items
-      try {
-        const value = await ctx.sessionController.list({}, AbortSignal.timeout(2500))
+        const value = await ctx.sessionController.list({}, AbortSignal.timeout(3000))
         const items = (value?.items ?? [])
           .filter((item) => item.origin !== 'subagent')
           .map((item) => {
@@ -140,11 +119,48 @@ export function apply(ctx, rawConfig) {
         sessionsListCache.items = items
         return items
       } catch {
-        // Busy turn or a slow controller: answer with the last known list rather
-        // than letting the peer time out and mark the link dead.
-        sessionsListCache.at = Date.now() - 2000
         return sessionsListCache.items
+      } finally {
+        sessionsListCache.refreshing = null
       }
+    })()
+    return sessionsListCache.refreshing
+  }
+
+  const sessions = {
+    /**
+     * One page of the session list. The full list is cached; paging keeps both
+     * the payload and the render bounded as the history grows.
+     */
+    async page(options) {
+      const limit = Math.min(100, Math.max(1, Number(options?.limit) || 40))
+      const offset = Math.max(0, Number(options?.cursor) || 0)
+      // Stale-while-revalidate. A peer call must never pay for a cold refresh:
+      // with data present the current page is served and a refresh runs behind
+      // it; only the very first call waits, and only briefly.
+      if (sessionsListCache.items.length === 0) {
+        await Promise.race([
+          refreshSessionList(),
+          new Promise((resolve) => setTimeout(resolve, 1200)),
+        ])
+      } else if (Date.now() - sessionsListCache.at > 4000) {
+        void refreshSessionList()
+      }
+      const items = sessionsListCache.items
+      const slice = items.slice(offset, offset + limit)
+      const nextOffset = offset + slice.length
+      return {
+        items: slice,
+        total: items.length,
+        nextCursor: nextOffset < items.length ? String(nextOffset) : null,
+      }
+    },
+    async list() {
+      // The local page can afford to wait once; peers use page() instead.
+      if (Date.now() - sessionsListCache.at > 2000 || sessionsListCache.items.length === 0) {
+        await refreshSessionList()
+      }
+      return sessionsListCache.items
     },
     follow(sessionId, signal) {
       return ctx.sessionController.follow(
@@ -528,11 +544,11 @@ export function apply(ctx, rawConfig) {
       // longer than a peer's call timeout; refreshing in the background keeps
       // /peer/sessions in the tens of milliseconds.
       const warmSessions = () => {
-        try { void sessions.list().catch(() => {}) } catch { /* still starting */ }
+        try { void refreshSessionList() } catch { /* still starting */ }
       }
-      const warmFirst = setTimeout(warmSessions, 1500)
+      const warmFirst = setTimeout(warmSessions, 1200)
       warmFirst.unref?.()
-      const warmTimer = setInterval(warmSessions, 15_000)
+      const warmTimer = setInterval(warmSessions, 8_000)
       warmTimer.unref?.()
       deviceIdentity = await loadOrCreateIdentity(
         identityFile,
