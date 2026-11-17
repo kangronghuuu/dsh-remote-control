@@ -1236,6 +1236,29 @@ window.__ModuleLoader__.load({
       )
     }
 
+    class PageErrorBoundary extends React.Component {
+      constructor(props) {
+        super(props)
+        this.state = { error: null }
+      }
+      static getDerivedStateFromError(error) {
+        return { error }
+      }
+      componentDidCatch(error, info) {
+        console.error('[remote-control] page render failed', error, info?.componentStack)
+      }
+      render() {
+        if (!this.state.error) return this.props.children
+        const message = String(this.state.error?.message || this.state.error)
+        const stack = String(this.state.error?.stack || '').split('\n').slice(0, 8).join('\n')
+        return h('div', { style: { padding: '16px', fontSize: '12px', color: 'var(--dsw-alias-label-primary)', display: 'flex', flexDirection: 'column', gap: '8px' } },
+          h('strong', null, 'Remote Control page failed to render'),
+          h('pre', { style: { whiteSpace: 'pre-wrap', margin: 0, opacity: 0.85 } }, message),
+          h('pre', { style: { whiteSpace: 'pre-wrap', margin: 0, fontSize: '10px', opacity: 0.6 } }, stack),
+        )
+      }
+    }
+
     function DevicesPage() {
       const [state, setState] = useState(null)
       const [error, setError] = useState(null)
@@ -2005,7 +2028,7 @@ window.__ModuleLoader__.load({
         }, Icon))
         ctx.slots.inject('main', () => ctx.slots.register({
           name: 'main', key: 'devices',
-        }, DevicesPage))
+        }, () => h(PageErrorBoundary, null, h(DevicesPage))))
       },
     }
   },
