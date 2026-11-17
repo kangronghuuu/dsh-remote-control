@@ -1595,7 +1595,9 @@ export function apply(ctx, rawConfig) {
     hitl.watch(sessionId)
 
     const heartbeat = setInterval(() => {
-      try { res.write(': ping\n\n') } catch { /* ignore */ }
+      // A comment line is invisible to EventSource, so the client cannot use it
+      // to detect a half-open connection.
+      try { res.write('data: ' + JSON.stringify({ type: 'ping' }) + '\n\n') } catch { /* ignore */ }
     }, 15000)
     heartbeat.unref?.()
 

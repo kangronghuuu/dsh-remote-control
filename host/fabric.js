@@ -1187,7 +1187,7 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
       'x-accel-buffering': 'no',
     })
     res.write(': connected\n\n')
-    const heartbeat = setInterval(() => { try { res.write(': ping\n\n') } catch { /* ignore */ } }, 15000)
+    const heartbeat = setInterval(() => { try { res.write('data: ' + JSON.stringify({ type: 'ping' }) + '\n\n') } catch { /* ignore */ } }, 15000)
     heartbeat.unref?.()
     let closed = false
     const cleanup = () => {

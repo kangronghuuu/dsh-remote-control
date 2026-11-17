@@ -506,13 +506,25 @@ function updateMeta() {
 /* ---------------- stream ---------------- */
 
 function openStream() {
+  clearInterval(state.streamWatchdog)
+  state.streamWatchdog = setInterval(() => {
+    if (!state.lastFrameAt) return
+    if (Date.now() - state.lastFrameAt > 45_000) {
+      state.lastFrameAt = Date.now()
+      // Reopen: a silent half-open connection never fires onerror.
+      try { state.source?.close() } catch { /* ignore */ }
+      openStream()
+    }
+  }, 10_000)
   state.source?.close()
   setStatus('connecting')
   const source = new EventSource(`/api/stream?sessionId=${encodeURIComponent(state.sessionId)}`)
   state.source = source
+  state.lastFrameAt = Date.now()
   source.onopen = () => setStatus('live')
   source.onerror = () => setStatus('error')
   source.onmessage = (event) => {
+    state.lastFrameAt = Date.now()
     let frame
     try { frame = JSON.parse(event.data) } catch { return }
     handleFrame(frame)
@@ -521,6 +533,8 @@ function openStream() {
 
 function handleFrame(frame) {
   if (!frame || typeof frame !== 'object') return
+  // Visible heartbeat: an SSE comment would be invisible to EventSource.
+  if (frame.type === 'ping') { state.lastFrameAt = Date.now(); return }
   if (frame.type === 'snapshot') {
     setStatus('live')
     if (typeof frame.cursor === 'number') state.lastSeq = Math.max(state.lastSeq, frame.cursor)
@@ -2053,6 +2067,7 @@ function renderTurnBanner() {
 
 const REASON_TEXT = {
   aborted: 'Turn interrupted — it was stopped before finishing.',
+  interrupted: 'Turn was interrupted — the Host restarted or the link dropped. The answer above is incomplete.',
   'max-tokens': 'Turn stopped at the token limit; the answer is incomplete.',
   error: 'Turn failed — the session may need another prompt.',
 }
@@ -2062,6 +2077,8 @@ function turnAlertFromReason(reason, at) {
   const kind = reason?.kind || 'unknown'
   const when = at ? ' · ' + new Date(at).toLocaleTimeString() : ''
   if (kind === 'aborted') return { kind, text: REASON_TEXT.aborted + when }
+  if (kind === 'interrupted') return { kind, text: REASON_TEXT.interrupted + when }
+  if (kind !== 'completed' && kind !== 'unknown' && kind !== '') return { kind: 'other', text: 'Turn ended unexpectedly (' + kind + ')' + when }
   if (kind === 'max-tokens') return { kind, text: REASON_TEXT['max-tokens'] + when }
   if (kind === 'error') {
     const message = reason?.error?.message || reason?.error?.code || 'unknown error'

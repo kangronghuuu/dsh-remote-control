@@ -687,6 +687,19 @@ window.__ModuleLoader__.load({
 
       const [error, setError] = useState(null)
       const [streamState, setStreamState] = useState('connecting')
+      const lastFrameAt = useRef(Date.now())
+      // A stalled SSE connection fires no error at all: without a watchdog the
+      // transcript just stops refreshing while the chip still says live.
+      useEffect(() => {
+        if (!peerId || !sessionId) return undefined
+        const timer = setInterval(() => {
+          if (Date.now() - lastFrameAt.current > 45_000) {
+            lastFrameAt.current = Date.now()
+            setAttempt((value) => value + 1)
+          }
+        }, 10_000)
+        return () => clearInterval(timer)
+      }, [peerId, sessionId])
       const [attempt, setAttempt] = useState(0)
       const [config, setConfig] = useState(null)
       const [configBusy, setConfigBusy] = useState(false)
@@ -714,6 +727,7 @@ window.__ModuleLoader__.load({
         )
         source.onopen = () => setStreamState('live')
         source.onmessage = (event) => {
+          lastFrameAt.current = Date.now()
           setStreamState('live')
           let frame
           try { frame = JSON.parse(event.data) } catch { return }
@@ -740,6 +754,7 @@ window.__ModuleLoader__.load({
             setEntries((current) => mergeEntries(current, [entry]))
             return
           }
+          if (frame.type === 'ping') { lastFrameAt.current = Date.now(); return }
           if (frame.type === 'assistant-stream') {
             const inner = frame.frame || {}
             if (inner.type === 'start') { setLive(''); setLiveReasoning(''); return }
@@ -926,8 +941,10 @@ window.__ModuleLoader__.load({
         const reason = lastEnd?.reason || {}
         const when = lastEnd?.at ? ' · ' + new Date(lastEnd.at).toLocaleTimeString() : ''
         if (reason.kind === 'aborted') setTurnAlert({ kind: 'aborted', text: 'Turn interrupted — it was stopped before finishing.' + when })
+        else if (reason.kind === 'interrupted') setTurnAlert({ kind: 'interrupted', text: 'Turn was interrupted — the Host restarted or the link dropped. The answer above is incomplete.' + when })
         else if (reason.kind === 'max-tokens') setTurnAlert({ kind: 'max-tokens', text: 'Turn stopped at the token limit; the answer is incomplete.' + when })
         else if (reason.kind === 'error') setTurnAlert({ kind: 'error', text: 'Turn failed: ' + (reason.error?.message || reason.error?.code || 'unknown error') + when })
+        else if (reason.kind && reason.kind !== 'completed') setTurnAlert({ kind: 'other', text: 'Turn ended unexpectedly (' + reason.kind + ')' + when })
         else setTurnAlert(null)
       }, [entries])
 
@@ -955,6 +972,7 @@ window.__ModuleLoader__.load({
       // message can either wait in the queue or be injected into the turn.
       const [mode, setMode] = useState('queue')
       const [queue, setQueue] = useState([])
+      const [queueNotice, setQueueNotice] = useState(null)
       const refreshQueue = useCallback(async () => {
         if (!peerId || !sessionId) return
         try {
@@ -1053,6 +1071,9 @@ window.__ModuleLoader__.load({
           setUploading(null)
           setPendingFiles([])
           await api(`/remote-control/api/peer/${encodeURIComponent(peerId)}/prompt`, { sessionId, text, attachments: sent, mode })
+          setQueueNotice(mode === 'steer'
+            ? 'Sent as a steer message into the running turn.'
+            : running ? 'Queued — it runs after the current turn ends.' : 'Sent.')
         refreshQueue()
         } catch (failure) {
           setUploading(null)
@@ -1245,6 +1266,9 @@ window.__ModuleLoader__.load({
           ? h('div', { style: S.hitlStack }, hitl.map((item) => h(HitlCard, { key: item.requestId, item, onAnswer: answerHitl })))
           : null,
         configBar,
+        queueNotice
+          ? h('div', { style: { ...S.metaWrap, padding: '4px 14px' } }, queueNotice)
+          : null,
         queue.length > 0
           ? h('div', { style: S.queueList }, queue.map((item) => h('div', { key: item.id, style: S.queueRow },
             h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, item.text || '(attachment)'),
