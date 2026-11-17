@@ -575,13 +575,18 @@ window.__ModuleLoader__.load({
      * A section that folds down to one summary line. The open state is kept per
      * browser so the page opens the way the user left it.
      */
-    function Collapsible({ title, summary, storageKey, defaultOpen = false, children }) {
+    function Collapsible({ title, summary, storageKey, defaultOpen = false, forceClose = 0, children }) {
       const [open, setOpen] = useState(() => {
         try {
           const saved = window.localStorage.getItem('dsh-remote-control:section:' + storageKey)
           return saved === null ? defaultOpen : saved === '1'
         } catch { return defaultOpen }
       })
+      // Picking a device or a session folds the picker so the transcript gets the
+      // whole width; the header line stays clickable to bring it back.
+      useEffect(() => {
+        if (forceClose) setOpen(false)
+      }, [forceClose])
       const toggle = () => {
         setOpen((value) => {
           const next = !value
@@ -976,7 +981,7 @@ window.__ModuleLoader__.load({
           : null,
         state?.service
           ? h(Collapsible, { title: 'Service', summary: 'tunnel / LAN reachability', storageKey: 'service', defaultOpen: true },
-              h('div', { style: { ...S.notice, display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
+              h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
             h('span', { style: { fontWeight: 600 } }, 'Service'),
             h('span', { style: { ...S.chip, ...(state.service.healthy ? S.chipOk : S.chipWarn) } }, state.service.healthy ? 'healthy' : 'unhealthy'),
             h('span', { style: S.meta }, state.service.provider + (state.service.since ? ' · up ' + uptimeText(state.service.since) : '')),
@@ -1004,7 +1009,7 @@ window.__ModuleLoader__.load({
           : null,
         state?.pairing?.code
           ? h(Collapsible, { title: 'Pairing', summary: 'code and QR for a new phone', storageKey: 'pairing', defaultOpen: false },
-              h('div', { style: { ...S.notice, display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' } },
+              h('div', { style: { display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' } },
             h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '240px' } },
               h('span', { style: S.meta }, 'Pairing code — enter it on the phone, or scan the code to pair automatically'),
               h('span', {
@@ -1040,7 +1045,7 @@ window.__ModuleLoader__.load({
           : null,
         notify
           ? h(Collapsible, { title: 'Notifications', summary: 'approval / question delivery', storageKey: 'notifications', defaultOpen: false },
-              h('div', { style: { ...S.notice, display: 'flex', flexDirection: 'column', gap: '10px' } },
+              h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
             h('div', { style: { display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' } },
               h('span', { style: { fontWeight: 600 } }, 'Notifications'),
               h('span', { style: S.meta }, 'approval / question reach you out of band — credentials stay in this Host'),
@@ -1170,7 +1175,14 @@ window.__ModuleLoader__.load({
           : null,
 
         h('div', { style: S.body },
-          h('div', { style: { ...S.column, ...S.pane } },
+          h(Collapsible, {
+              title: 'Devices',
+              summary: openPeer ? openPeer.deviceName : peers.length + ' found',
+              storageKey: 'picker:devices',
+              defaultOpen: true,
+              forceClose: openPeer ? 1 : 0,
+            },
+              h('div', { style: { ...S.column, ...S.pane } },
             h('div', { style: S.list },
               peers.length === 0
                 ? h('div', { style: S.empty }, 'No other DSH device found on this network yet.')
@@ -1227,6 +1239,7 @@ window.__ModuleLoader__.load({
                 )),
             ),
           ),
+            ),
 
           openPeer
             ? h('div', { style: { ...S.column, flex: 1, minWidth: 0 } },
@@ -1235,7 +1248,16 @@ window.__ModuleLoader__.load({
                 : sessions.length === 0
                   ? h('div', { style: S.empty }, 'This device has no sessions.')
                   : h('div', { style: { display: 'flex', flex: 1, minHeight: 0 } },
-                    h('div', { style: { ...S.column, ...S.pane, width: '220px' } },
+                    h(Collapsible, {
+                      title: 'Sessions',
+                      summary: sessionId
+                        ? (sessions.find((session) => session.id === sessionId)?.title || sessionId)
+                        : 'pick a session',
+                      storageKey: 'picker:sessions',
+                      defaultOpen: true,
+                      forceClose: sessionId ? 1 : 0,
+                    },
+                      h('div', { style: { ...S.column, ...S.pane, width: '220px' } },
                       h('div', { style: S.list }, sessions.map((session) => h('div', {
                         key: session.id,
                         style: { ...S.row, ...S.rowButton, ...(sessionId === session.id ? S.rowActive : {}) },
@@ -1247,6 +1269,7 @@ window.__ModuleLoader__.load({
                             [session.running ? 'running' : '', session.blank ? 'empty' : '', relativeTime(session.updatedAt)].filter(Boolean).join(' · ')),
                         ),
                       ))),
+                    ),
                     ),
                     sessionId
                       ? h(Chat, {
