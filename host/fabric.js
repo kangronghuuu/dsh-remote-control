@@ -1467,13 +1467,27 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
     return { ok: reply.status >= 200 && reply.status < 300, status: reply.status, json: parsed }
   }
 
-  async function callPeer(deviceId, method, pathname, body, options) {
+  /**
+   * The direct lane is sealed with a per-peer key that rotates underneath us
+   * (rehandshake, restart). A 403 from that gate means "this lane is stale",
+   * not "you may not do this", so it is repaired and retried once.
+   */
+  const LANE_STALE_ERRORS = new Set(['no-channel', 'plaintext-not-allowed', 'bad-envelope'])
+  function laneStale(result) {
+    return Boolean(result && result.status === 403 && LANE_STALE_ERRORS.has(result.json?.error))
+  }
+
+  async function callPeer(deviceId, method, pathname, body, options = {}) {
     syncRelayPeers()
     const peer = peers.get(deviceId)
     if (!peer) return { ok: false, status: 404, json: { error: 'unknown-peer' } }
     const approval = approvals.get(deviceId)
     if (!approval) return { ok: false, status: 403, json: { error: 'not-approved' } }
-    return peerCall(peer, method, pathname, body, approval.secret, options)
+    const first = await peerCall(peer, method, pathname, body, approval.secret, options)
+    if (!laneStale(first) || options.retriedLane) return first
+    log.warn('[remote-control] stale sealed lane for ' + deviceId + ' (' + (first.json?.error) + '); rehandshaking')
+    try { await rehandshakeHook?.(deviceId) } catch { /* the retry decides */ }
+    return peerCall(peer, method, pathname, body, approval.secret, { ...options, retriedLane: true })
   }
 
   /** Relay one peer's SSE transcript to a local response (Devices panel). */

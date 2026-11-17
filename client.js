@@ -525,6 +525,16 @@ window.__ModuleLoader__.load({
       return Boolean(ref && typeof ref === 'object' && typeof ref.attachmentId === 'string' && ref.attachmentId !== '')
     }
 
+    /**
+     * Only a value that looks like a path may be read from disk. An attachment's
+     * display name ("image.png") is not a path and would 404.
+     */
+    function looksLikePath(value) {
+      const text = String(value ?? '')
+      if (!text) return false
+      return /^[A-Za-z]:[\\/]/.test(text) || /^\\\\/.test(text) || text.includes('/') || text.includes('\\')
+    }
+
     /** A block may describe a file by path instead of by attachment id. */
     function refPath(ref) {
       if (!ref) return ''
@@ -1524,12 +1534,15 @@ window.__ModuleLoader__.load({
     function splitVisualFiles(files) {
       const images = []
       const rest = []
+      const attachments = []
       for (const ref of Array.isArray(files) ? files : []) {
-        const name = String(ref?.name || ref?.path || '')
-        if (IMAGE_EXTENSIONS.test(name)) images.push(ref)
+        const pathText = looksLikePath(refPath(ref)) ? refPath(ref) : ''
+        if (pathText && IMAGE_EXTENSIONS.test(pathText)) images.push(ref)
+        else if (pathText) rest.push(ref)
+        else if (hasAttachmentId(ref)) attachments.push(ref)
         else rest.push(ref)
       }
-      return { images, rest }
+      return { images, rest, attachments }
     }
 
     function renderEntry(entry, context = {}) {
@@ -1545,7 +1558,15 @@ window.__ModuleLoader__.load({
               key: 'up' + position,
               peerId: context.peerId,
               sessionId: context.sessionId,
-              filePath: String(ref?.path || ref?.name || ''),
+              filePath: refPath(ref),
+            })))
+            : null,
+          visuals.attachments.length
+            ? h('div', { style: S.imageRow }, visuals.attachments.map((ref, position) => h(AttachmentImage, {
+              key: 'ua' + position,
+              peerId: context.peerId,
+              sessionId: context.sessionId,
+              attachment: ref,
             })))
             : null,
           entry.files?.length
@@ -1570,7 +1591,15 @@ window.__ModuleLoader__.load({
               key: 'p' + position,
               peerId: context.peerId,
               sessionId: context.sessionId,
-              filePath: String(ref?.path || ref?.name || ''),
+              filePath: refPath(ref),
+            })))
+            : null,
+          visuals.attachments.length
+            ? h('div', { style: S.imageRow }, visuals.attachments.map((ref, position) => h(AttachmentImage, {
+              key: 'fa' + position,
+              peerId: context.peerId,
+              sessionId: context.sessionId,
+              attachment: ref,
             })))
             : null,
           entry.reasoning
