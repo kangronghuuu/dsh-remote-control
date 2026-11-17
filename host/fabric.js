@@ -1404,9 +1404,9 @@ export function createFabric({ log, config, self, sessions, stateFile, store, up
     rehandshake: rehandshakePeer,
     attemptPunch: punchPeer,
     // Diagnostics used by the latency tests and by the Devices panel tooling.
-    simulateAnnounce(deviceId, address, port) {
+    simulateAnnounce(deviceId, address, port, proto = 'http') {
       onAnnounce(
-        { kind: ANNOUNCE_KIND, deviceId, deviceName: `simulated-${deviceId}`, userId: null, port, proto: 'http' },
+        { kind: ANNOUNCE_KIND, deviceId, deviceName: `simulated-${deviceId}`, userId: null, port, proto },
         { address },
       )
     },

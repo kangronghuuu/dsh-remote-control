@@ -43,13 +43,24 @@ export async function detectTailnet({ timeoutMs = 4000, run = defaultRun, candid
     const dnsName = rawName.replace(/\.$/, '')
     const ips = Array.isArray(doc?.Self?.TailscaleIPs) ? doc.Self.TailscaleIPs : []
     const certDomains = Array.isArray(doc?.CertDomains) ? doc.CertDomains : []
+    const suffix = typeof doc?.MagicDNSSuffix === 'string' ? doc.MagicDNSSuffix.replace(/\.$/, '') : ''
+    const peers = Object.values(doc?.Peer ?? {})
+      .filter((peer) => peer && typeof peer.DNSName === 'string' && peer.DNSName !== '')
+      .filter((peer) => suffix === '' || peer.DNSName.replace(/\.$/, '').endsWith(`.${suffix}`))
+      .map((peer) => ({
+        dnsName: peer.DNSName.replace(/\.$/, ''),
+        ip: Array.isArray(peer.TailscaleIPs) && typeof peer.TailscaleIPs[0] === 'string' ? peer.TailscaleIPs[0] : '',
+        online: peer.Online === true,
+        hostName: typeof peer.HostName === 'string' ? peer.HostName : '',
+      }))
     return {
       available: true,
       bin,
       dnsName,
       ip: typeof ips[0] === 'string' ? ips[0] : '',
       hasCert: certDomains.some((entry) => String(entry).replace(/\.$/, '') === dnsName),
-      magicDnsSuffix: typeof doc?.MagicDNSSuffix === 'string' ? doc.MagicDNSSuffix : '',
+      magicDnsSuffix: suffix,
+      peers,
     }
   }
   return { available: false }

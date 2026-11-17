@@ -351,6 +351,43 @@ export function apply(ctx, rawConfig) {
     ctx.effect(() => () => { try { serviceManager.stop() } catch { /* ignore */ } })
   }
 
+  /**
+   * Tailnet discovery: UDP broadcast cannot cross subnets, but the tailnet hands
+   * every device a stable name. Ask each online peer whether it hosts this
+   * plugin, and seed the ones that do — no manual invite, no relay required.
+   */
+  async function discoverTailnetPeers() {
+    if (!fabric || !tailnet?.available) return { probed: 0, found: 0 }
+    const self = safely(() => fabric.snapshot().self) ?? {}
+    const candidates = (tailnet.peers ?? []).filter((peer) => peer.online && peer.dnsName)
+    const queue = [...candidates]
+    let found = 0
+    const worker = async () => {
+      while (queue.length > 0) {
+        const peer = queue.shift()
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 4000)
+        try {
+          const response = await fetch(`https://${peer.dnsName}/api/identity`, { signal: controller.signal })
+          if (!response.ok) continue
+          const identity = await response.json()
+          if (identity?.service !== 'dsh-remote-control') continue
+          if (typeof identity.deviceId !== 'string' || identity.deviceId === '' || identity.deviceId === self.deviceId) continue
+          // port 443 over https: the tailnet serves the listener behind TLS.
+          fabric.simulateAnnounce(identity.deviceId, peer.dnsName, 443, 'https')
+          found += 1
+        } catch {
+          // not a Host, offline, or no certificate - nothing to seed
+        } finally {
+          clearTimeout(timer)
+        }
+      }
+    }
+    await Promise.all([worker(), worker(), worker(), worker()])
+    if (found > 0) log.info?.(`[remote-control] tailnet discovery seeded ${found} peer(s)`)
+    return { probed: candidates.length, found }
+  }
+
   const ready = loadState(stateFile, config, log)
     .then(async (loaded) => {
       state = loaded
@@ -366,6 +403,11 @@ export function apply(ctx, rawConfig) {
           config.trustedHosts = [...new Set([...config.trustedHosts, tailnet.dnsName])]
         }
         log.info?.(`[remote-control] tailnet detected: ${tailnet.dnsName} (${tailnetAddress})`)
+      }
+      // Retry a couple of times: fabric comes up a moment after the Host does.
+      for (const delay of [2500, 9000, 30000]) {
+        const timer = setTimeout(() => { void discoverTailnetPeers().catch(() => {}) }, delay)
+        timer.unref?.()
       }
       deviceIdentity = await loadOrCreateIdentity(
         identityFile,
@@ -903,6 +945,23 @@ export function apply(ctx, rawConfig) {
         authenticated: isAuthenticated(req, state.secret),
         name: 'DSH Remote Control',
         version: '0.1.0',
+      })
+    }
+
+    // Public identity for tailnet discovery: enough for a peer to recognise
+    // another DSH Host and seed it, and nothing more. No sessions, config or
+    // secrets — pairing, approval and scopes are unchanged.
+    if (pathname === '/api/identity') {
+      const self = safely(() => fabric.snapshot().self) ?? {}
+      return json(res, 200, {
+        service: 'dsh-remote-control',
+        version: '0.1.0',
+        deviceId: typeof self.deviceId === 'string' ? self.deviceId : '',
+        deviceName: typeof self.deviceName === 'string' ? self.deviceName : '',
+        accountId: typeof self.userId === 'string' ? self.userId : null,
+        fingerprintPrefix: typeof self.fingerprint === 'string' ? self.fingerprint.slice(0, 8) : '',
+        port: info.port,
+        proto: info.proto,
       })
     }
 
