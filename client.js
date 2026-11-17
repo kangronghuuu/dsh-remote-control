@@ -93,7 +93,8 @@ window.__ModuleLoader__.load({
         padding: '14px', borderRadius: '12px', background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l1)',
       },
       sheetText: { margin: 0, padding: '8px', borderRadius: '8px', fontSize: '11px', whiteSpace: 'pre-wrap', maxHeight: '52vh', overflow: 'auto', background: 'var(--dsw-alias-bg-layer-3, rgba(127,127,127,.12))' },
-      pendingRow: { display: 'flex', gap: '6px', flexWrap: 'wrap', padding: '6px 0' },
+      pendingRow: { display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', padding: '6px 0' },
+      pendingThumb: { width: '18px', height: '18px', borderRadius: '4px', objectFit: 'cover' },
       pendingChip: {
         display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '999px',
         fontSize: '11px', border: '1px solid var(--dsw-alias-border-l1)',
@@ -649,10 +650,38 @@ window.__ModuleLoader__.load({
         if (typeof initialScrollTop === 'number' && initialScrollTop > 0) node.scrollTop = initialScrollTop
       }, [entries])
 
+      // Image chips get a local thumbnail so a paste is visibly accepted.
+      const previews = useRef(new Map())
+      const previewFor = (file) => {
+        if (!file || !String(file.type || '').startsWith('image/')) return ''
+        try {
+          if (!previews.current.has(file)) previews.current.set(file, URL.createObjectURL(file))
+          return previews.current.get(file)
+        } catch {
+          return ''
+        }
+      }
+
       const addFiles = useCallback((list) => {
         const files = Array.from(list ?? []).filter((file) => file && typeof file.size === 'number')
         if (files.length > 0) setPendingFiles((current) => [...current, ...files])
       }, [])
+
+      // Paste anywhere in the chat, not only while the textarea has focus: the
+      // window-level fallthrough used to drop the file into the app's own
+      // composer, where this page could never see it.
+      const handlePaste = useCallback((event) => {
+        const files = []
+        for (const item of event.clipboardData?.items ?? []) {
+          if (item.kind !== 'file') continue
+          const file = item.getAsFile()
+          if (file) files.push(file)
+        }
+        if (files.length === 0) return
+        event.preventDefault()
+        event.stopPropagation()
+        addFiles(files)
+      }, [addFiles])
 
       const dropFiles = useCallback((event) => {
         event.preventDefault()
@@ -894,7 +923,7 @@ window.__ModuleLoader__.load({
         )
         : null
 
-      return h('div', { style: { ...S.column, flex: 1, minHeight: 0 } },
+      return h('div', { style: { ...S.column, flex: 1, minHeight: 0 }, onPaste: handlePaste },
         preview ? h(FileSheet, { peerId, ref: preview, onClose: () => setPreview(null) }) : null,
         h('div', {
           style: { padding: '10px 18px', borderBottom: '1px solid var(--dsw-alias-border-l1)', fontSize: '13px', fontWeight: 600 },
@@ -978,7 +1007,12 @@ window.__ModuleLoader__.load({
           h('span', { style: S.meta }, mode === 'steer' ? 'inject into the running turn' : 'wait until the turn ends'),
         ),
         pendingFiles.length > 0
-          ? h('div', { style: S.pendingRow }, pendingFiles.map((file, position) => h('span', { key: (file.name || 'file') + position, style: S.pendingChip },
+          ? h('div', { style: S.pendingRow },
+            h('span', { style: S.meta }, pendingFiles.length + ' file(s) ready to send'),
+            pendingFiles.map((file, position) => h('span', { key: (file.name || 'file') + position, style: S.pendingChip },
+            previewFor(file)
+              ? h('img', { src: previewFor(file), alt: file.name || 'image', style: S.pendingThumb })
+              : null,
             h('span', { style: { maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, file.name || 'file'),
             h('button', {
               type: 'button',
@@ -986,7 +1020,8 @@ window.__ModuleLoader__.load({
               title: 'Remove',
               onClick: () => setPendingFiles((current) => current.filter((_, index) => index !== position)),
             }, '\u00d7'),
-          )))
+          )),
+            )
           : null,
         h('div', { style: S.composer, onDragOver: (event) => event.preventDefault(), onDrop: dropFiles },
           pendingFiles.length > 0 || uploading
@@ -1017,17 +1052,7 @@ window.__ModuleLoader__.load({
             value: draft,
             placeholder: 'Message this device…',
             onChange: (event) => setDraft(event.target.value),
-            onPaste: (event) => {
-              const files = []
-              for (const item of event.clipboardData?.items ?? []) {
-                if (item.kind !== 'file') continue
-                const file = item.getAsFile()
-                if (file) files.push(file)
-              }
-              if (files.length === 0) return
-              event.preventDefault()
-              addFiles(files)
-            },
+
             onKeyDown: (event) => {
               if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send() }
             },
