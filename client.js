@@ -745,7 +745,7 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function Chat({ peerId, sessionId, title, blank, initialScrollTop, initialPinned, onScrollTop, onNewSession }) {
+    function Chat({ peerId, sessionId, title, blank, initialScrollTop, initialPinned, onScrollTop, onNewSession, onRefreshSessions }) {
       const [entries, setEntries] = useState([])
       const [live, setLive] = useState('')
       const [liveReasoning, setLiveReasoning] = useState('')
@@ -866,6 +866,12 @@ window.__ModuleLoader__.load({
             return
           }
           if (frame.type === 'ping') { lastFrameAt.current = Date.now(); return }
+          if (frame.type === 'event' && (frame.event?.type === 'turn/start' || frame.event?.type === 'turn/end')) {
+            const running = frame.event.type === 'turn/start'
+            setSessions((current) => (current || []).map((item) => (
+              item.id === sessionId ? { ...item, running, updatedAt: Date.now() } : item
+            )))
+          }
           if (frame.type === 'assistant-stream') {
             const inner = frame.frame || {}
             if (inner.type === 'start') { setLive(''); setLiveReasoning(''); setLiveSession(sessionId); return }
@@ -1146,6 +1152,7 @@ window.__ModuleLoader__.load({
       const [mode, setMode] = useState('queue')
       const [queue, setQueue] = useState([])
       const [queueNotice, setQueueNotice] = useState(null)
+      const pollTicks = useRef(0)
       const refreshQueue = useCallback(async () => {
         if (!peerId || !sessionId) return
         try {
@@ -1165,9 +1172,15 @@ window.__ModuleLoader__.load({
       }, [peerId, sessionId])
       useEffect(() => {
         refreshQueue()
+        // The list rides on the same cadence: every other queue tick (5s) the first
+        // page is refreshed and merged into the rows already on screen.
+        const listTimer = setInterval(() => {
+          pollTicks.current += 1
+          if (pollTicks.current % 2 === 0) void onRefreshSessions?.()
+        }, 5000)
         const timer = setInterval(refreshQueue, 2500)
-        return () => clearInterval(timer)
-      }, [refreshQueue])
+        return () => { clearInterval(timer); clearInterval(listTimer) }
+      }, [refreshQueue, onRefreshSessions])
       const editQueued = async (item) => {
         // Editing means "take it back and change it": remove the queued item and
         // load its text into the composer.
@@ -2036,6 +2049,15 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
+      /** Update the rows already loaded, prepend newly created ones. */
+      const mergeSessions = (current, incoming) => {
+        const byId = new Map((current || []).map((item) => [item.id, item]))
+        for (const item of incoming || []) byId.set(item.id, item)
+        const merged = [...byId.values()]
+        merged.sort((a, b) => Number(Boolean(a.blank)) - Number(Boolean(b.blank)) || (b.updatedAt || 0) - (a.updatedAt || 0))
+        return merged
+      }
+
       const open = useCallback(async (peer) => {
         setOpenPeer(peer)
         setSessions(null)
@@ -2058,13 +2080,25 @@ window.__ModuleLoader__.load({
         setSessionPage((value) => ({ ...value, loading: true }))
         try {
           const page = await fetchSessions(openPeer.deviceId, sessionPage.cursor)
-          setSessions((current) => current.concat(page.items))
+          setSessions((current) => mergeSessions(current, page.items))
           setSessionPage({ cursor: page.cursor, total: page.total, loading: false })
         } catch (failure) {
           setError(failure.message)
           setSessionPage((value) => ({ ...value, loading: false }))
         }
       }, [openPeer, sessionPage.cursor, sessionPage.loading, fetchSessions])
+
+      // The list is a live view, but it rides on the poll we already run for the open
+      // session: every second tick (5s) the first page is refreshed and merged, so a
+      // session that starts or finishes a turn cannot stay "idle · 18m ago".
+      const refreshSessionRows = useCallback(async () => {
+        if (!openPeer) return
+        try {
+          const page = await fetchSessions(openPeer.deviceId, null)
+          setSessions((current) => mergeSessions(current || [], page.items))
+          setSessionPage((value) => ({ ...value, total: page.total || value.total }))
+        } catch { /* keep the last good list */ }
+      }, [openPeer, fetchSessions])
 
       // A short first page must not look like the whole list.
       useEffect(() => {
@@ -2669,6 +2703,7 @@ window.__ModuleLoader__.load({
                     sessionId
                       ? h(Chat, {
                         peerId: openPeer.deviceId,
+                        onRefreshSessions: refreshSessionRows,
                         onNewSession: async () => {
                           try {
                             const created = await api('/remote-control/api/peer/' + encodeURIComponent(openPeer.deviceId) + '/new-session', {})

@@ -401,6 +401,20 @@ function relativeTime(value) {
   return `${days}d ago`
 }
 
+/** Merge a fresh first page into the rows already on screen. */
+async function refreshSessionRows() {
+  if (!state.sessionId) return
+  try {
+    const value = await request('/api/sessions?limit=' + SESSION_PAGE_SIZE)
+    const items = Array.isArray(value.items) ? value.items : []
+    const byId = new Map(state.sessions.map((session) => [session.id, session]))
+    for (const item of items) byId.set(item.id, item)
+    state.sessions = [...byId.values()]
+    state.sessionsTotal = Number(value.total) || state.sessionsTotal
+    renderSessions()
+  } catch { /* keep the last good list */ }
+}
+
 async function createSession() {
   closeDrawer()
   try {
@@ -1901,6 +1915,8 @@ function renderQueue(items) {
 }
 
 async function refreshQueue() {
+  state.pollTicks = (state.pollTicks || 0) + 1
+  if (state.pollTicks % 2 === 0) void refreshSessionRows()
   if (!state.sessionId) return
   try {
     const value = await request(`/api/state?sessionId=${encodeURIComponent(state.sessionId)}`)
@@ -2215,9 +2231,19 @@ function turnAlertFromReason(reason, at) {
 /* ---------------- actions ---------------- */
 
 setInterval(() => { if (state.running) renderRunStatus() }, 1000)
+setInterval(refreshQueue, 2500)
 
 
 function setRunning(value) {
+  // Mirror the open session's run state into its list row immediately.
+  if (state.sessionId) {
+    const row = state.sessions.find((session) => session.id === state.sessionId)
+    if (row && row.running !== value) {
+      row.running = value
+      row.updatedAt = Date.now()
+      renderSessions()
+    }
+  }
   state.running = value
   if (value) state.turnStartedAt = Date.now()
   renderRunStatus()
