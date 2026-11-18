@@ -431,6 +431,14 @@ function selectSession(id) {
   updateHistoryButton()
   state.live = null
   state.liveText = ''
+  state.liveReasoning = ''
+  state.liveThinking = null
+  state.turnAlert = null
+  state.snapshotRecords = []
+  state.openTurnSeq = null
+  state.runningKnown = false
+  state.lastFrameAt = Date.now()
+  renderTurnBanner()
   state.running = false
   state.pending = []
   state.config = null

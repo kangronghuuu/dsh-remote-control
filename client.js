@@ -811,6 +811,13 @@ window.__ModuleLoader__.load({
         seen.current = new Set()
         setEntries([])
         setLive('')
+        // The reasoning stream is per-session: leaving it behind is why the previous
+        // session's "Reasoning · streaming…" card stayed in the transcript.
+        setLiveReasoning('')
+        setTurnAlert(null)
+        runningRef.current = false
+        setRunningKnown(false)
+        lastFrameAt.current = Date.now()
         setRunning(false)
         setError(null)
         setStreamState('connecting')
