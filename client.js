@@ -749,6 +749,9 @@ window.__ModuleLoader__.load({
       const [entries, setEntries] = useState([])
       const [live, setLive] = useState('')
       const [liveReasoning, setLiveReasoning] = useState('')
+      // Which session the live text belongs to: a structural guard against showing
+      // a previous session's streaming output after a switch.
+      const [liveSession, setLiveSession] = useState(null)
       const [running, setRunning] = useState(false)
       const [draft, setDraft] = useState('')
       const [pendingFiles, setPendingFiles] = useState([])
@@ -796,6 +799,14 @@ window.__ModuleLoader__.load({
       const [attempt, setAttempt] = useState(0)
       const [config, setConfig] = useState(null)
       const [configBusy, setConfigBusy] = useState(false)
+      // Clear per-session live output immediately on a switch, independently of the
+      // stream effect's own lifecycle.
+      useEffect(() => {
+        setLive('')
+        setLiveReasoning('')
+        setLiveSession(null)
+      }, [peerId, sessionId])
+
       const seen = useRef(new Set())
       const chatRoot = useRef(null)
       const inputRef = useRef(null)
@@ -857,13 +868,15 @@ window.__ModuleLoader__.load({
           if (frame.type === 'ping') { lastFrameAt.current = Date.now(); return }
           if (frame.type === 'assistant-stream') {
             const inner = frame.frame || {}
-            if (inner.type === 'start') { setLive(''); setLiveReasoning(''); return }
+            if (inner.type === 'start') { setLive(''); setLiveReasoning(''); setLiveSession(sessionId); return }
             if (inner.type === 'chunk' && inner.chunk?.type === 'text-delta') {
+              setLiveSession(sessionId)
               setLive((current) => current + String(inner.chunk.text ?? ''))
             }
             // Thinking streams as its own delta; dropping it was why reasoning
             // only appeared once the message finished.
             if (inner.type === 'chunk' && inner.chunk?.type === 'reasoning-delta') {
+              setLiveSession(sessionId)
               setLiveReasoning((current) => (current + String(inner.chunk.text ?? '')).slice(0, 20_000))
             }
             if (inner.type === 'end') {
@@ -1417,7 +1430,7 @@ window.__ModuleLoader__.load({
           streamState === 'error' && entries.length > 0
             ? h('div', { style: S.note }, 'Stream lost — retrying…')
             : null,
-          live || liveReasoning
+          liveSession === sessionId && (live || liveReasoning)
             ? h('div', { style: { ...S.bubble, ...S.assistantBubble, opacity: 0.85 } },
               liveReasoning
                 ? h('details', { style: S.reasoningBlock, open: true },
