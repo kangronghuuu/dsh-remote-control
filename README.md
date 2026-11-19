@@ -13,6 +13,20 @@ Pair two Hosts once, then read and control each other's sessions: send prompts, 
 
 Requires DSH `0.2.x` · Node 20+
 
+## Demo
+
+A 13-second tour of the phone UI: paired desktops, a live transcript with reasoning
+and tool calls, queued messages, and an approval answered from the phone. Every
+name, path and message in it is synthetic; `tools/demo-capture.mjs` regenerates
+the assets from an offline mock host.
+
+![Demo: sessions, live transcript and an approval](https://cdn.jsdelivr.net/npm/dsh-remote-control-plugin@0.7.67/docs/demo/demo.gif)
+
+[Watch the video (MP4)](https://cdn.jsdelivr.net/npm/dsh-remote-control-plugin@0.7.67/docs/demo/demo.mp4) ·
+[Session list](https://cdn.jsdelivr.net/npm/dsh-remote-control-plugin@0.7.67/docs/demo/phone-sessions.jpg) ·
+[Transcript](https://cdn.jsdelivr.net/npm/dsh-remote-control-plugin@0.7.67/docs/demo/phone-chat.jpg) ·
+[Approval](https://cdn.jsdelivr.net/npm/dsh-remote-control-plugin@0.7.67/docs/demo/phone-approval.jpg)
+
 ## Install
 
 From the DSH **Plugins** page, install the package into your profile:
