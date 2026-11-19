@@ -20,6 +20,7 @@ import { createHitl } from './host/hitl.js'
 import { createNotifier, normalizeNotify, verifyAction } from './host/notify.js'
 import { loadOrCreateIdentity } from './host/identity.js'
 import { detectTailnet, tailnetUrl } from './host/tailnet.js'
+import Schema from '@deepseek-ai/schemastery'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const WEB_DIR = path.join(HERE, 'web')
@@ -51,6 +52,36 @@ const STATIC_FILES = {
 
 export const inject = ['sessionController']
 
+const NOTIFY_EVENTS = ['approval', 'question']
+
+/**
+ * Settings a user can edit in the Plugin Manager or the agent can inspect.
+ *
+ * Every field is volatile: they are read at request time, so saving them takes
+ * effect immediately instead of restarting the plugin (a restart would drop the
+ * live peer links). Secrets are deliberately absent: the SMTP password stays in
+ * the local state file, never in this configuration.
+ */
+export const Config = Schema.object({
+  hitlTakeover: Schema.union([Schema.const('claim'), Schema.const('race')]).default('claim').volatile(),
+  localSelf: Schema.boolean().default(true).volatile(),
+  publicUrl: Schema.string().default('').volatile(),
+  trustedHosts: Schema.array(Schema.string()).default([]).volatile(),
+  notify: Schema.object({
+    enabled: Schema.boolean().default(false).volatile(),
+    kind: Schema.union([Schema.const('smtp'), Schema.const('mailgun'), Schema.const('none')]).default('none').volatile(),
+    baseUrl: Schema.string().default('').volatile(),
+    events: Schema.array(Schema.union([Schema.const('approval'), Schema.const('question')])).default(['approval']).volatile(),
+    from: Schema.string().default('').volatile(),
+    to: Schema.string().default('').volatile(),
+    smtpHost: Schema.string().default('').volatile(),
+    smtpPort: Schema.natural().max(65535).default(465).volatile(),
+    smtpUser: Schema.string().default('').volatile(),
+    mailgunDomain: Schema.string().default('').volatile(),
+    mailgunApiUrl: Schema.string().default('').volatile(),
+  }).default({}),
+})
+
 /**
  * Phone-friendly remote control for this Host's Sessions.
  *
@@ -59,6 +90,80 @@ export const inject = ['sessionController']
  * `/api` bridge. Everything it renders is derived from
  * `ctx.sessionController` (list / follow / prompt / cancel / create).
  */
+/** Plain values out of the schema's volatile references. */
+function configValues(rawConfig) {
+  if (!rawConfig || typeof rawConfig !== 'object') return {}
+  const read = (value) => (value && typeof value.get === 'function' ? value.get() : value)
+  const rawNotify = rawConfig.notify && typeof rawConfig.notify.get === 'function' ? read(rawConfig.notify) : rawConfig.notify
+  const notify = rawNotify && typeof rawNotify === 'object'
+    ? {
+      enabled: read(rawNotify.enabled),
+      kind: read(rawNotify.kind),
+      baseUrl: read(rawNotify.baseUrl),
+      events: read(rawNotify.events),
+      from: read(rawNotify.from),
+      to: read(rawNotify.to),
+      smtpHost: read(rawNotify.smtpHost),
+      smtpPort: read(rawNotify.smtpPort),
+      smtpUser: read(rawNotify.smtpUser),
+      mailgunDomain: read(rawNotify.mailgunDomain),
+      mailgunApiUrl: read(rawNotify.mailgunApiUrl),
+    }
+    : undefined
+  const values = {}
+  const takeover = read(rawConfig.hitlTakeover)
+  if (takeover === 'claim' || takeover === 'race') values.hitl = { takeover }
+  if (typeof read(rawConfig.localSelf) === 'boolean') values.localSelf = read(rawConfig.localSelf)
+  if (typeof read(rawConfig.publicUrl) === 'string') values.publicUrl = read(rawConfig.publicUrl)
+  if (Array.isArray(read(rawConfig.trustedHosts))) values.trustedHosts = read(rawConfig.trustedHosts)
+  if (notify && typeof notify === 'object') {
+    values.notify = {
+      enabled: Boolean(notify.enabled),
+      kind: notify.kind ?? 'none',
+      baseUrl: notify.baseUrl ?? '',
+      events: Array.isArray(notify.events) ? notify.events : ['approval'],
+      from: notify.from ?? '',
+      to: notify.to ?? '',
+      smtpHost: notify.smtpHost ?? '',
+      smtpPort: Number(notify.smtpPort) || 465,
+      smtpUser: notify.smtpUser ?? '',
+      domain: notify.mailgunDomain ?? '',
+      apiUrl: notify.mailgunApiUrl ?? '',
+    }
+  }
+  return values
+}
+
+/**
+ * Persist settings through DSH's config editor when the profile provides one, and
+ * always mirror to the local file: the Desktop app may regenerate the profile
+ * patch, and losing a user's notification setup with it would be worse than a
+ * redundant copy. Returns true when at least one destination accepted the write.
+ */
+function createSettingsWriter(ctx, log) {
+  let editor = null
+  let entry = null
+  try {
+    editor = typeof ctx.get === 'function' ? ctx.get('configEditor') : undefined
+    entry = ctx.fiber?.entry
+  } catch { /* older profile */ }
+  return async function saveSettings(settingsFile, patch, writeFile) {
+    const mirror = writeFile(settingsFile, patch, log)
+    let configOk = false
+    if (editor && entry) {
+      try {
+        await editor.edit(entry, (current) => ({ ...current, ...patch }))
+        configOk = true
+      } catch (error) {
+        log.warn(`[remote-control] config editor rejected the settings: ${error?.message || error}`)
+      }
+    } else {
+      log.info('[remote-control] this profile has no config editor; settings are mirrored to ' + settingsFile)
+    }
+    return configOk || mirror
+  }
+}
+
 export function apply(ctx, rawConfig) {
   const log = pickLogger(ctx)
   const config = normalizeConfig(rawConfig)
@@ -67,7 +172,13 @@ export function apply(ctx, rawConfig) {
   // cordis.patch.yml on startup and drops rows it does not own, so anything that
   // must survive a restart lives here instead (see applySettingsOverrides).
   const settingsFile = path.join(dshHome(), 'remote-control-settings.json')
-  applySettingsOverrides(config, readSettingsFile(settingsFile, log))
+  // The DSH plugin config is the source of truth; the local file stays as a
+  // write-through mirror because the Desktop app can regenerate the profile patch.
+  const legacySettings = readSettingsFile(settingsFile, log)
+  applySettingsOverrides(config, legacySettings)
+  const configured = configValues(rawConfig)
+  applySettingsOverrides(config, configured)
+  const settingsWriter = createSettingsWriter(ctx, log)
   const peersFile = path.join(dshHome(), 'remote-control-peers.json')
   const identityFile = path.join(dshHome(), 'remote-control-identity.json')
   const streams = new Set()
@@ -798,8 +909,9 @@ export function apply(ctx, rawConfig) {
       const patch = sanitizeNotifyPatch(body)
       const current = readSettingsFile(settingsFile, log)
       const merged = { ...current, notify: { ...(current.notify ?? {}), ...patch } }
-      if (!writeSettingsFile(settingsFile, merged, log)) {
-        return json(res, 500, { error: 'settings-write-failed' })
+      const saved = await settingsWriter(settingsFile, { notify: merged.notify }, writeSettingsFile)
+      if (!saved) {
+        return json(res, 500, { error: 'settings-write-failed', message: 'Neither the DSH config nor the local file accepted the settings.' })
       }
       config.notify = normalizeNotify(merged.notify)
       // Rebuild the notifier so the new channel works without a restart.
