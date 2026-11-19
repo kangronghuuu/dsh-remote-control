@@ -1,5 +1,8 @@
 # dsh-remote-control-plugin
 
+![Devices panel with paired desktops](https://cdn.jsdelivr.net/npm/dsh-remote-control-plugin@0.7.66/docs/preview.svg)
+
+
 Drive another DSH desktop from a **Devices** panel inside your own DSH — or from a phone — without a cloud account in the middle.
 
 Pair two Hosts once, then read and control each other's sessions: send prompts, queue or steer while a turn runs, answer approvals and questions, browse history and attachments. The same Host also serves a phone-friendly web page that pairs with a 6-digit code or a QR scan.
@@ -165,3 +168,14 @@ node --check host/fabric.js host/handshake.js web/app.js
 ```
 
 The test harnesses are `rc-*.mjs` scripts kept outside the package: headless Chrome renders for transcript features (markdown, diffs, turn navigation, queue, attachments, HITL, compaction), unit tests for tailnet discovery and the handshake proof, and static guards for layout constraints, module scope, the peer route surface and the bundle manifest. They are not shipped with the package.
+
+## License
+
+MIT — see [LICENSE](https://cdn.jsdelivr.net/npm/dsh-remote-control-plugin@0.7.66/LICENSE).
+
+## Security
+
+Report vulnerabilities privately to **16051414+kangronghuuu@users.noreply.github.com**; do not open a
+public issue or attach pairing codes, device secrets, or notification
+credentials. The policy and scope are in
+[SECURITY.md](https://cdn.jsdelivr.net/npm/dsh-remote-control-plugin@0.7.66/SECURITY.md).

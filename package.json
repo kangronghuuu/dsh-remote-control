@@ -1,6 +1,6 @@
 {
   "name": "dsh-remote-control-plugin",
-  "version": "0.7.65",
+  "version": "0.7.66",
   "type": "module",
   "description": "Remote control for DSH: a Devices panel that discovers other DSH desktops signed into the same account, pairs with them once, and drives their sessions.",
   "exports": {
@@ -16,8 +16,10 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
+    "LICENSE",
     "README.md",
     "INSTALL.md",
+    "SECURITY.md",
     "web/index.html",
     "web/app.js",
     "web/app.css",
@@ -38,5 +40,32 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.19.0"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Kangrong Hu",
+    "email": "16051414+kangronghuuu@users.noreply.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kangronghuuu/dsh-remote-control.git"
+  },
+  "homepage": "https://www.npmjs.com/package/dsh-remote-control-plugin",
+  "bugs": {
+    "email": "16051414+kangronghuuu@users.noreply.github.com"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "deepseek-harness",
+    "remote-control",
+    "tailscale",
+    "pairing",
+    "mobile",
+    "chat"
+  ],
+  "engines": {
+    "node": ">=20"
   }
 }
