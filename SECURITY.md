@@ -5,16 +5,19 @@ devices, so a vulnerability here is a serious one. Please report it privately.
 
 ## Reporting
 
-Email **16051414+kangronghuuu@users.noreply.github.com** with:
+Use **GitHub's private vulnerability reporting**: open the repository's
+**Security** tab and choose **Report a vulnerability**. That opens a private
+advisory only the maintainer can read, and it keeps the report out of the
+public issue tracker until a fix is released.
 
-- the affected version (the Devices panel header shows the loaded build),
-- the platform (Windows / macOS / Linux),
-- what an attacker would gain, and the steps that demonstrate it.
+If the report is not sensitive (for example, a documentation correction or a
+non-exploitable crash), a regular issue is fine:
+https://github.com/kangronghuuu/dsh-remote-control/issues
 
-Do not open a public issue, paste working exploits into chat, or attach your
-pairing code, device secret, identity keys, or notification credentials. If a
-secret may have leaked, rotate it first (**Settings → Pairing → Rotate**) and
-then report.
+Do not open a public issue for an exploitable problem, paste working exploits
+into chat, or attach your pairing code, device secret, identity keys, or
+notification credentials. If a secret may have leaked, rotate it first
+(**Settings → Pairing → Rotate**) and then report.
 
 ## Scope
 

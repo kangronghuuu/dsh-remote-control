@@ -1,6 +1,6 @@
 {
   "name": "dsh-remote-control-plugin",
-  "version": "0.7.67",
+  "version": "0.7.68",
   "type": "module",
   "description": "Remote control for DSH: a Devices panel that discovers other DSH desktops signed into the same account, pairs with them once, and drives their sessions.",
   "exports": {
@@ -44,8 +44,7 @@
   },
   "license": "MIT",
   "author": {
-    "name": "Kangrong Hu",
-    "email": "16051414+kangronghuuu@users.noreply.github.com"
+    "name": "Kangrong Hu"
   },
   "repository": {
     "type": "git",
@@ -53,7 +52,7 @@
   },
   "homepage": "https://www.npmjs.com/package/dsh-remote-control-plugin",
   "bugs": {
-    "email": "16051414+kangronghuuu@users.noreply.github.com"
+    "url": "https://github.com/kangronghuuu/dsh-remote-control/issues"
   },
   "keywords": [
     "dsh",

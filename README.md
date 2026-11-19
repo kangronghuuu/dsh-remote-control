@@ -189,7 +189,8 @@ MIT — see [LICENSE](https://cdn.jsdelivr.net/npm/dsh-remote-control-plugin@0.7
 
 ## Security
 
-Report vulnerabilities privately to **16051414+kangronghuuu@users.noreply.github.com**; do not open a
-public issue or attach pairing codes, device secrets, or notification
-credentials. The policy and scope are in
-[SECURITY.md](https://cdn.jsdelivr.net/npm/dsh-remote-control-plugin@0.7.66/SECURITY.md).
+Report vulnerabilities through the repository's **Security → Report a
+vulnerability** flow (a private advisory; no email address is published). Do not
+open a public issue for an exploitable problem, and never attach pairing codes,
+device secrets, or notification credentials. The policy and scope are in
+[SECURITY.md](https://cdn.jsdelivr.net/npm/dsh-remote-control-plugin@0.7.68/SECURITY.md).
