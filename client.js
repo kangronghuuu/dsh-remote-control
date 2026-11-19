@@ -6,7 +6,7 @@ window.__ModuleLoader__.load({
     const { useCallback, useEffect, useMemo, useRef, useState } = React
 
     /** Build marker: a cached bundle is the difference between fixed and broken. */
-    const CLIENT_VERSION = '0.7.58'
+    const CLIENT_VERSION = '0.7.65'
     try { window.__DSH_RC_CLIENT_VERSION__ = CLIENT_VERSION } catch { /* not a browser */ }
 
     const S = {
@@ -2311,7 +2311,12 @@ window.__ModuleLoader__.load({
           ? h(SetupWizard, { busy, error, onChoose: setupChoice, onSkip: () => setWizardSkipped(true) })
           : null,
         h('div', { style: S.header },
-          h('span', { style: { ...S.meta, opacity: 0.55 }, title: 'Remote control client build' }, 'v' + CLIENT_VERSION),
+          h('span', {
+            style: { ...S.meta, opacity: 0.55 },
+            title: 'Host build and page build: they differ until the page is refreshed',
+          }, state?.version
+            ? ('v' + state.version + (state.version === CLIENT_VERSION ? '' : ' · page ' + CLIENT_VERSION))
+            : 'v' + CLIENT_VERSION),
           h('div', null,
             h('h2', { style: S.title }, 'Devices'),
             h('div', { style: S.subtitle },

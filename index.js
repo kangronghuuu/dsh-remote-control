@@ -23,6 +23,10 @@ import { detectTailnet, tailnetUrl } from './host/tailnet.js'
 import Schema from '@deepseek-ai/schemastery'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
+/** Host build, surfaced in /state so the page can show what is actually loaded. */
+const PLUGIN_VERSION = (() => {
+  try { return String(JSON.parse(readFileSync(path.join(HERE, 'package.json'), 'utf8')).version || '') } catch { return '' }
+})()
 const WEB_DIR = path.join(HERE, 'web')
 const COOKIE_NAME = 'dsh_rc'
 const MAX_BODY_BYTES = 1024 * 1024
@@ -90,8 +94,71 @@ export const Config = Schema.object({
  * `/api` bridge. Everything it renders is derived from
  * `ctx.sessionController` (list / follow / prompt / cancel / create).
  */
-/** Plain values out of the schema's volatile references. */
-function configValues(rawConfig) {
+/** Existing saved settings translated to config fields, without secrets. */
+function legacySettingsAsConfig(legacy) {
+  const notify = legacy?.notify && typeof legacy.notify === 'object' ? legacy.notify : null
+  const seed = {}
+  if (legacy?.hitl?.takeover === 'claim' || legacy?.hitl?.takeover === 'race') seed.hitlTakeover = legacy.hitl.takeover
+  if (typeof legacy?.publicUrl === 'string' && legacy.publicUrl !== '') seed.publicUrl = legacy.publicUrl
+  if (Array.isArray(legacy?.trustedHosts) && legacy.trustedHosts.length > 0) seed.trustedHosts = legacy.trustedHosts.filter((entry) => typeof entry === 'string')
+  if (notify) {
+    seed.notify = {
+      enabled: notify.enabled === true,
+      kind: notify.kind === 'mailgun' ? 'mailgun' : notify.kind === 'smtp' ? 'smtp' : 'none',
+      baseUrl: typeof notify.baseUrl === 'string' ? notify.baseUrl : '',
+      events: Array.isArray(notify.events) ? notify.events.filter((event) => event === 'approval' || event === 'question') : ['approval'],
+      from: typeof notify.from === 'string' ? notify.from : '',
+      to: typeof notify.to === 'string' ? notify.to : '',
+      smtpHost: typeof notify.smtpHost === 'string' ? notify.smtpHost : '',
+      smtpPort: Number(notify.smtpPort) || 465,
+      smtpUser: typeof notify.smtpUser === 'string' ? notify.smtpUser : '',
+      mailgunDomain: typeof notify.domain === 'string' ? notify.domain : '',
+      mailgunApiUrl: typeof notify.apiUrl === 'string' ? notify.apiUrl : '',
+    }
+  }
+  return Object.keys(seed).length > 0 ? seed : null
+}
+
+/** Plain values out of the schema's volatile references. *//** Read the schema defaults once so "unset" is distinguishable from "default". */
+const SCHEMA_DEFAULTS = (() => {
+  try {
+    const raw = Config({})
+    const read = (value) => (value && typeof value.get === 'function' ? value.get() : value)
+    const notifyRaw = read(raw.notify)
+    // Aliases must match the names configValues uses, or every comparison fails.
+    const notify = notifyRaw && typeof notifyRaw === 'object'
+      ? {
+        enabled: read(notifyRaw.enabled),
+        kind: read(notifyRaw.kind),
+        baseUrl: read(notifyRaw.baseUrl),
+        events: read(notifyRaw.events),
+        from: read(notifyRaw.from),
+        to: read(notifyRaw.to),
+        smtpHost: read(notifyRaw.smtpHost),
+        smtpPort: read(notifyRaw.smtpPort),
+        smtpUser: read(notifyRaw.smtpUser),
+        domain: read(notifyRaw.mailgunDomain),
+        apiUrl: read(notifyRaw.mailgunApiUrl),
+      }
+      : {}
+    return {
+      hitlTakeover: read(raw.hitlTakeover),
+      localSelf: read(raw.localSelf),
+      publicUrl: read(raw.publicUrl),
+      trustedHosts: [...(read(raw.trustedHosts) ?? [])],
+      notify,
+    }
+  } catch { return null }
+})()
+
+/**
+ * Plain values out of the schema's volatile references.
+ *
+ * Only values that differ from the schema default count: the loader always hands
+ * back references (defaults included), so treating every reference as a user
+ * setting would silently replace the saved settings with defaults.
+ */
+export function configValues(rawConfig) {
   if (!rawConfig || typeof rawConfig !== 'object') return {}
   const read = (value) => (value && typeof value.get === 'function' ? value.get() : value)
   const rawNotify = rawConfig.notify && typeof rawConfig.notify.get === 'function' ? read(rawConfig.notify) : rawConfig.notify
@@ -131,7 +198,26 @@ function configValues(rawConfig) {
       apiUrl: notify.mailgunApiUrl ?? '',
     }
   }
-  return values
+  if (!SCHEMA_DEFAULTS) return values
+  // Drop everything that is still the schema default: absent means "not set here".
+  const out = {}
+  if (values.hitl && values.hitl.takeover !== SCHEMA_DEFAULTS.hitlTakeover) out.hitl = values.hitl
+  if (values.localSelf !== undefined && values.localSelf !== SCHEMA_DEFAULTS.localSelf) out.localSelf = values.localSelf
+  if (values.publicUrl && values.publicUrl !== SCHEMA_DEFAULTS.publicUrl) out.publicUrl = values.publicUrl
+  if (Array.isArray(values.trustedHosts) && JSON.stringify(values.trustedHosts) !== JSON.stringify(SCHEMA_DEFAULTS.trustedHosts)) {
+    out.trustedHosts = values.trustedHosts
+  }
+  if (values.notify) {
+    const defaults = SCHEMA_DEFAULTS.notify ?? {}
+    // Only changed leaves: the patch layer merges this over the saved settings, so
+    // an untouched field must not travel as its default value.
+    const changed = {}
+    for (const [key, value] of Object.entries(values.notify)) {
+      if (JSON.stringify(value) !== JSON.stringify(defaults[key])) changed[key] = value
+    }
+    if (Object.keys(changed).length > 0) out.notify = changed
+  }
+  return out
 }
 
 /**
@@ -179,6 +265,16 @@ export function apply(ctx, rawConfig) {
   const configured = configValues(rawConfig)
   applySettingsOverrides(config, configured)
   const settingsWriter = createSettingsWriter(ctx, log)
+  // First run after upgrading to a Config-aware build: mirror what the user
+  // already had into the config row so it becomes visible and editable there.
+  if (Object.keys(configured).length === 0 && Object.keys(legacySettings).length > 0) {
+    const seed = legacySettingsAsConfig(legacySettings)
+    if (seed) {
+      settingsWriter(settingsFile, seed, () => true)
+        .then((saved) => { if (saved) log.info('[remote-control] migrated existing settings into the plugin config') })
+        .catch(() => { /* the file mirror still holds them */ })
+    }
+  }
   const peersFile = path.join(dshHome(), 'remote-control-peers.json')
   const identityFile = path.join(dshHome(), 'remote-control-identity.json')
   const streams = new Set()
@@ -931,6 +1027,7 @@ export function apply(ctx, rawConfig) {
     }
     if (action === '/state' && req.method === 'GET') {
       const snapshot = fabric.snapshot()
+      snapshot.version = PLUGIN_VERSION
       const urls = relayCore ? shareUrls() : []
       snapshot.relay = {
         url: relayLink?.url() ?? '',
